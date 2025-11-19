@@ -16,7 +16,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Plus, Timer, ChevronDown, ArrowUp, MoreVertical, Pin, ListChecks, Globe } from "lucide-react";
+import { Plus, Timer, ChevronDown, ArrowUp, MoreVertical, Pin, ListChecks, Globe, SlidersHorizontal } from "lucide-react";
 import { Message } from "./message";
 import { CreateTestModal } from "./tests/create-test-modal";
 import { TestDisplayModal, Test } from "./tests/test-display-modal";
@@ -670,6 +670,22 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
                     </TooltipTrigger>
                     <TooltipContent>
                       <p>Create Test</p>
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-md border border-border/40 hover:border-border hover:bg-accent/5"
+                        onClick={() => {/* TODO: Add settings action */}}
+                      >
+                        <SlidersHorizontal className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Settings</p>
                     </TooltipContent>
                   </Tooltip>
                 </div>

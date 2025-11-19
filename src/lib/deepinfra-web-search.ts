@@ -214,6 +214,21 @@ MINIMIZE TOOL CALLS:
     if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
       console.log(`🛠️  [DeepInfra Web Search] Model requested ${assistantMessage.tool_calls.length} tool call(s)`);
 
+      // If tools weren't offered but model still returned tool calls, it's hallucinating
+      // Treat this as if it didn't provide content and force a final response
+      if (!shouldOfferTools) {
+        console.log(`⚠️  [DeepInfra Web Search] Model hallucinated tool calls when tools not offered. Forcing final response.`);
+
+        // Add a strong system message
+        conversationMessages.push({
+          role: 'system',
+          content: `CRITICAL: You are NOT allowed to use tools anymore. You have already completed your search. You MUST provide a final text response NOW using the information you already gathered. DO NOT attempt to call any functions or tools.`
+        });
+
+        // Continue to next iteration
+        continue;
+      }
+
       // Check if we've already hit the max tool calls limit
       if (toolCallsCount >= maxToolCalls) {
         console.log(`⚠️  [DeepInfra Web Search] Max tool calls (${maxToolCalls}) reached. Forcing final response.`);
