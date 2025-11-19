@@ -149,7 +149,7 @@ MINIMIZE TOOL CALLS:
 - ONLY use webSearch when absolutely necessary for current/recent information
 - Prefer answering from existing knowledge when possible
 - If you must search, make it count - use broad, comprehensive queries
-- NEVER make more than 2 searches total`
+- You can only make 1 search, so make it comprehensive and thorough`
   };
 
   console.log('📋 [Cerebras Web Search] System Prompt:', systemPrompt.content);
@@ -157,7 +157,7 @@ MINIMIZE TOOL CALLS:
   const conversationMessages: any[] = [systemPrompt, ...messages];
   let iteration = 0;
   const maxIterations = options?.maxIterations || 4;
-  const maxToolCalls = options?.maxToolCalls || 2;
+  const maxToolCalls = options?.maxToolCalls || 1;
   let toolCallsCount = 0;
   let totalUsage = {
     promptTokens: 0,

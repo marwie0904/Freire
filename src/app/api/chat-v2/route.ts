@@ -231,7 +231,7 @@ export async function POST(req: Request) {
           temperature: 0.3,
           maxTokens: 2000,
           maxIterations: 4,
-          maxToolCalls: 2
+          maxToolCalls: 1
         }
       );
 
