@@ -1,9 +1,9 @@
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { streamText } from "ai";
+import { streamText, convertToModelMessages } from "ai";
+import { createCerebras } from "@ai-sdk/cerebras";
+import { createDeepInfra } from "@ai-sdk/deepinfra";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
-import { webSearchTool } from "@/lib/tools/web-search";
 import { trackLLMCallServer, calculateLLMCost } from "@/lib/analytics/llm-tracking";
 import { usdToPhp } from "@/lib/currency";
 import { getProviderForModel } from "@/lib/provider-helper";
@@ -23,8 +23,30 @@ export async function POST(req: Request) {
       return Response.json({ error: "Missing message, cardId, or canvasId" }, { status: 400 });
     }
 
-    // Use the selected model or default to GPT-OSS-20B (FREIRE LITE)
-    modelName = model || "openai/gpt-oss-20b";
+    // Default to Cerebras GPT-OSS 120b (FREIRE FAST)
+    const defaultModel = "cerebras/gpt-oss-120b";
+    modelName = model || defaultModel;
+
+    // Get provider type for model
+    const getProviderType = (modelName: string): "cerebras" | "deepinfra" | "disabled" => {
+      if (modelName === "openai/gpt-oss-20b") return "deepinfra"; // FREIRE LITE
+      if (modelName === "cerebras/gpt-oss-120b") return "cerebras"; // FREIRE FAST
+      if (modelName === "openai/gpt-oss-120b") return "disabled"; // FREIRE (original) - disabled
+      return "cerebras"; // Default to Cerebras
+    };
+
+    const providerType = getProviderType(modelName);
+
+    // Block disabled models
+    if (providerType === "disabled") {
+      return Response.json(
+        {
+          error: "This model is currently unavailable",
+          details: "Please select FREIRE LITE or FREIRE FAST",
+        },
+        { status: 400 }
+      );
+    }
 
     // Get all cards for this canvas
     const cards = await convex.query(api.canvasCards.list, {
@@ -42,7 +64,7 @@ export async function POST(req: Request) {
     const messages = [
       {
         role: "system" as const,
-        content: "You have access to a web search tool. When the user asks you to search for information, look up current events, or get real-time data, you MUST use the webSearch tool. Always use the tool when the user explicitly mentions 'web search' or 'search for'.\n\nIMPORTANT GUIDELINES:\n- If you do not know the answer or if the question is ambiguous, use the webSearch tool to find a better understanding.\n- If the question requires recent, up-to-date, or web-based information, use the webSearch tool to get current data.\n- When uncertain about factual information, prefer searching rather than guessing or providing potentially outdated information.\n- Use web search proactively for any topic that may have changed recently or requires real-time information.",
+        content: "You are a helpful AI assistant. Answer questions concisely and accurately.",
       },
       ...conversationHistory.map((msg: any) => ({
         role: msg.role,
@@ -54,70 +76,46 @@ export async function POST(req: Request) {
       },
     ];
 
-    // Use OpenRouter to generate response
-    const openrouter = createOpenRouter({
-      apiKey: process.env.OPENROUTER_API_KEY,
+    // Initialize providers
+    const cerebras = createCerebras({
+      apiKey: process.env.CEREBRAS_API_KEY,
     });
 
-    // Configure provider preferences based on model
-    const getProviderConfig = (modelName: string) => {
-      switch (modelName) {
-        case "openai/gpt-oss-120b":
-          return {
-            providerPreferences: {
-              order: ["gmicloud/fp4"],
-            },
-          };
-        case "openai/gpt-oss-20b":
-          return {
-            providerPreferences: {
-              order: ["hyperbolic"],
-            },
-          };
-        case "moonshotai/kimi-k2-thinking":
-          return {
-            providerPreferences: {
-              order: ["chutes/int4", "fireworks"],
-            },
-          };
-        default:
-          return {};
-      }
-    };
+    const deepinfra = createDeepInfra({
+      apiKey: process.env.DEEPINFRA_API_KEY,
+    });
+
+    // Select model based on provider
+    console.log("🔧 [Provider] Using provider:", providerType);
+    let selectedModel;
+    if (providerType === "deepinfra") {
+      // FREIRE LITE - DeepInfra GPT-OSS 20B
+      selectedModel = deepinfra("openai/gpt-oss-20b");
+      console.log("🔧 [Model] Using DeepInfra with openai/gpt-oss-20b");
+    } else {
+      // FREIRE FAST - Cerebras GPT-OSS 120B (default)
+      selectedModel = cerebras("gpt-oss-120b");
+      console.log("🔧 [Model] Using Cerebras with gpt-oss-120b");
+    }
 
     // Store token usage to send at the end (captured from onFinish)
     let tokenUsageData: { promptTokens: number; completionTokens: number; totalTokens: number } | null = null;
 
     // Use streamText for streaming response
-    const result = streamText({
-      model: openrouter(modelName, {
-        usage: {
-          include: true,
-        },
-        ...getProviderConfig(modelName),
-      }),
+    const result = await streamText({
+      model: selectedModel,
       messages,
-      tools: {
-        webSearch: webSearchTool,
-      },
-      onFinish: async ({ text, usage, experimental_providerMetadata }: any) => {
+      temperature: 0.7,
+      async onFinish({ usage }) {
         console.log("✅ Generation complete, tracking usage...");
 
-        // Track AI usage
         const latencyMs = Date.now() - startTime;
-
-        // OpenRouter returns usage in providerMetadata
-        const openrouterUsage = (experimental_providerMetadata as any)?.openrouter?.usage;
-
-        console.log("📊 [RAW] OpenRouter usage:", JSON.stringify(openrouterUsage, null, 2));
-        console.log("📊 [RAW] AI SDK usage:", JSON.stringify(usage, null, 2));
 
         if (usage) {
           const usageData = usage as any;
-          const promptToks = usageData?.inputTokens ?? openrouterUsage?.prompt_tokens ?? usageData?.promptTokens ?? usageData?.prompt_tokens ?? 0;
-          const completionToks = usageData?.outputTokens ?? openrouterUsage?.completion_tokens ?? usageData?.completionTokens ?? usageData?.completion_tokens ?? 0;
-          const reasoningToks = usageData?.reasoningTokens ?? 0;
-          const totalToks = usageData?.totalTokens ?? openrouterUsage?.total_tokens ?? usageData?.total_tokens ?? (promptToks + completionToks);
+          const promptToks = usageData?.promptTokens ?? 0;
+          const completionToks = usageData?.completionTokens ?? 0;
+          const totalToks = usageData?.totalTokens ?? (promptToks + completionToks);
           const costUsd = calculateLLMCost(modelName, promptToks, completionToks);
 
           console.log("💰 Cost Calculation:", {
@@ -138,7 +136,7 @@ export async function POST(req: Request) {
           // Track in PostHog
           await trackLLMCallServer({
             model: modelName,
-            provider: "openrouter",
+            provider: providerType,
             promptTokens: promptToks,
             completionTokens: completionToks,
             totalTokens: totalToks,
@@ -151,7 +149,6 @@ export async function POST(req: Request) {
           await convex.mutation(api.aiTracking.track, {
             inputTokens: promptToks,
             outputTokens: completionToks,
-            reasoningTokens: reasoningToks > 0 ? reasoningToks : undefined,
             totalTokens: totalToks,
             model: modelName,
             provider: getProviderForModel(modelName),
@@ -216,8 +213,8 @@ export async function POST(req: Request) {
 
     // Track failed LLM call in PostHog
     await trackLLMCallServer({
-      model: modelName || "openai/gpt-oss-20b",
-      provider: "openrouter",
+      model: modelName || "cerebras/gpt-oss-120b",
+      provider: "unknown",
       promptTokens: 0,
       completionTokens: 0,
       totalTokens: 0,
@@ -233,8 +230,8 @@ export async function POST(req: Request) {
         inputTokens: 0,
         outputTokens: 0,
         totalTokens: 0,
-        model: modelName || "openai/gpt-oss-20b",
-        provider: getProviderForModel(modelName || "openai/gpt-oss-20b"),
+        model: modelName || "cerebras/gpt-oss-120b",
+        provider: getProviderForModel(modelName || "cerebras/gpt-oss-120b"),
         usageType: "canvas",
         costUsd: 0,
         costPhp: 0,

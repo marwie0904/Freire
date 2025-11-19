@@ -1,6 +1,6 @@
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { streamText } from "ai";
-import { webSearchTool } from "@/lib/tools/web-search";
+import { streamText, convertToModelMessages } from "ai";
+import { createCerebras } from "@ai-sdk/cerebras";
+import { createDeepInfra } from "@ai-sdk/deepinfra";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../convex/_generated/api";
 import { trackLLMCallServer, calculateLLMCost } from "@/lib/analytics/llm-tracking";
@@ -81,66 +81,69 @@ Please answer their question concisely and accurately. If you don't know somethi
 
     console.log("Messages being sent to AI:", JSON.stringify(messages, null, 2));
 
-    // Initialize OpenRouter with API key
-    const openrouter = createOpenRouter({
-      apiKey: process.env.OPENROUTER_API_KEY,
-    });
+    // Default to Cerebras GPT-OSS 120b (FREIRE FAST)
+    const defaultModel = "cerebras/gpt-oss-120b";
 
-    // Configure provider preferences based on model
-    const getProviderConfig = (modelName: string) => {
-      switch (modelName) {
-        case "openai/gpt-oss-120b":
-          return {
-            providerPreferences: {
-              order: ["gmicloud/fp4"],
-            },
-          };
-        case "openai/gpt-oss-20b":
-          return {
-            providerPreferences: {
-              order: ["hyperbolic"],
-            },
-          };
-        case "moonshotai/kimi-k2-thinking":
-          return {
-            providerPreferences: {
-              order: ["chutes/int4", "fireworks"],
-            },
-          };
-        default:
-          return {};
-      }
+    // Get provider type for model
+    const getProviderType = (modelName: string): "cerebras" | "deepinfra" | "disabled" => {
+      if (modelName === "openai/gpt-oss-20b") return "deepinfra"; // FREIRE LITE
+      if (modelName === "cerebras/gpt-oss-120b") return "cerebras"; // FREIRE FAST
+      if (modelName === "openai/gpt-oss-120b") return "disabled"; // FREIRE (original) - disabled
+      return "cerebras"; // Default to Cerebras
     };
 
-    // Create the model instance with the same model as main chat and enable usage tracking
-    const selectedModel = openrouter(model || "openai/gpt-oss-120b", {
-      usage: {
-        include: true,
-      },
-      ...getProviderConfig(model || "openai/gpt-oss-120b"),
+    const providerType = getProviderType(model || defaultModel);
+
+    // Block disabled models
+    if (providerType === "disabled") {
+      return new Response(
+        JSON.stringify({
+          error: "This model is currently unavailable",
+          details: "Please select FREIRE LITE or FREIRE FAST",
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    // Initialize providers
+    const cerebras = createCerebras({
+      apiKey: process.env.CEREBRAS_API_KEY,
     });
 
+    const deepinfra = createDeepInfra({
+      apiKey: process.env.DEEPINFRA_API_KEY,
+    });
+
+    // Select model based on provider
+    console.log("🔧 [Provider] Using provider:", providerType);
+    let selectedModel;
+    if (providerType === "deepinfra") {
+      // FREIRE LITE - DeepInfra GPT-OSS 20B
+      selectedModel = deepinfra("openai/gpt-oss-20b");
+      console.log("🔧 [Model] Using DeepInfra with openai/gpt-oss-20b");
+    } else {
+      // FREIRE FAST - Cerebras GPT-OSS 120B (default)
+      selectedModel = cerebras("gpt-oss-120b");
+      console.log("🔧 [Model] Using Cerebras with gpt-oss-120b");
+    }
+
     // Stream the response with onFinish callback for tracking
-    const result = streamText({
+    const result = await streamText({
       model: selectedModel,
       messages: messages,
-      // Note: Tools disabled for highlight chat to avoid compatibility issues with some providers
-      onFinish: async ({ usage, experimental_providerMetadata }) => {
+      temperature: 0.7,
+      async onFinish({ usage }) {
         console.log("✅ Generation complete, tracking usage...");
-
-        // OpenRouter returns usage in providerMetadata
-        const openrouterUsage = (experimental_providerMetadata as any)?.openrouter?.usage;
-
-        console.log("📊 [RAW] OpenRouter usage:", JSON.stringify(openrouterUsage, null, 2));
-        console.log("📊 [RAW] AI SDK usage:", JSON.stringify(usage, null, 2));
 
         if (usage) {
           const usageData = usage as any;
-          const promptToks = usageData?.inputTokens ?? openrouterUsage?.prompt_tokens ?? usageData?.promptTokens ?? usageData?.prompt_tokens ?? 0;
-          const completionToks = usageData?.outputTokens ?? openrouterUsage?.completion_tokens ?? usageData?.completionTokens ?? usageData?.completion_tokens ?? 0;
-          const reasoningToks = usageData?.reasoningTokens ?? 0;
-          const totalToks = usageData?.totalTokens ?? openrouterUsage?.total_tokens ?? usageData?.total_tokens ?? (promptToks + completionToks);
-          const modelName = model || "openai/gpt-oss-120b";
+          const promptToks = usageData?.promptTokens ?? 0;
+          const completionToks = usageData?.completionTokens ?? 0;
+          const totalToks = usageData?.totalTokens ?? (promptToks + completionToks);
+          const modelName = model || defaultModel;
           const costUsd = calculateLLMCost(modelName, promptToks, completionToks);
           const costPhp = usdToPhp(costUsd);
 
@@ -152,7 +155,7 @@ Please answer their question concisely and accurately. If you don't know somethi
           // Track in PostHog
           await trackLLMCallServer({
             model: modelName,
-            provider: "openrouter",
+            provider: providerType,
             promptTokens: promptToks,
             completionTokens: completionToks,
             totalTokens: totalToks,
@@ -165,7 +168,6 @@ Please answer their question concisely and accurately. If you don't know somethi
           await convex.mutation(api.aiTracking.track, {
             inputTokens: promptToks,
             outputTokens: completionToks,
-            reasoningTokens: reasoningToks > 0 ? reasoningToks : undefined,
             totalTokens: totalToks,
             model: modelName,
             provider: getProviderForModel(modelName),
@@ -185,8 +187,27 @@ Please answer their question concisely and accurately. If you don't know somethi
       },
     });
 
-    // Return the streaming response
-    return result.toTextStreamResponse();
+    // Return plain text stream for frontend (highlight chat expects raw text)
+    const encoder = new TextEncoder();
+    const customStream = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const textPart of result.textStream) {
+            controller.enqueue(encoder.encode(textPart));
+          }
+          controller.close();
+        } catch (error) {
+          controller.error(error);
+        }
+      },
+    });
+
+    return new Response(customStream, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
   } catch (error) {
     console.error("Highlight Chat API Error:", error);
 
@@ -195,7 +216,7 @@ Please answer their question concisely and accurately. If you don't know somethi
     // Track failed LLM call in PostHog
     await trackLLMCallServer({
       model: "unknown",
-      provider: "openrouter",
+      provider: "unknown",
       promptTokens: 0,
       completionTokens: 0,
       totalTokens: 0,
