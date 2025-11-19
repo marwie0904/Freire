@@ -1,5 +1,31 @@
 import OpenAI from 'openai';
 
+/**
+ * ⚠️ KNOWN ISSUES WITH GPT-OSS-20B TOOL CALLING ⚠️
+ *
+ * This model has documented tool calling problems that make it unreliable:
+ *
+ * 1. HALLUCINATION: Model returns tool_calls even when tools are not offered in the API request
+ * 2. INCONSISTENT OUTPUT: Produces reasoning text mentioning tools instead of proper structured calls
+ * 3. POOR RELIABILITY: Community reports it performs worse than smaller models (e.g., Qwen3-4b)
+ *
+ * Reference: https://huggingface.co/openai/gpt-oss-20b/discussions/80
+ *
+ * Current Status: DISABLED in UI (see src/lib/models.ts line 28)
+ *
+ * Potential Solutions to Try in Future:
+ * - Set tool_choice to 'required' instead of 'auto'
+ * - Explicitly list tools in system prompt with schema
+ * - Try DeepInfra's alternative models with better tool support
+ * - Switch to Llama 3.1 70B which has confirmed working tool calling
+ *
+ * Implementation Notes:
+ * - Base URL: https://api.deepinfra.com/v1/openai (OpenAI-compatible)
+ * - Model: openai/gpt-oss-20b
+ * - Temperature: 0.3 (lower temps recommended for tool calling)
+ * - Our implementation follows OpenAI standard format correctly
+ */
+
 // Web search tool definition (OpenAI format)
 const webSearchTool = {
   type: 'function' as const,
@@ -213,45 +239,25 @@ MINIMIZE TOOL CALLS:
     // Check if there are tool calls
     if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
       console.log(`🛠️  [DeepInfra Web Search] Model requested ${assistantMessage.tool_calls.length} tool call(s)`);
+      console.log(`🔍 [DEBUG] shouldOfferTools: ${shouldOfferTools}, toolCallsCount: ${toolCallsCount}, maxToolCalls: ${maxToolCalls}`);
 
-      // If tools weren't offered but model still returned tool calls, it's hallucinating
-      // Treat this as if it didn't provide content and force a final response
-      if (!shouldOfferTools) {
-        console.log(`⚠️  [DeepInfra Web Search] Model hallucinated tool calls when tools not offered. Forcing final response.`);
+      // If we've hit the max tool calls OR tools weren't offered, model is hallucinating - force final response
+      if (!shouldOfferTools || toolCallsCount >= maxToolCalls) {
+        console.log(`⚠️  [DeepInfra Web Search] Tool limit reached or tools not offered. Rejecting tool calls and forcing text response.`);
 
-        // Add a strong system message
+        // REJECT the tool calls by NOT executing them and adding a directive
         conversationMessages.push({
           role: 'system',
-          content: `CRITICAL: You are NOT allowed to use tools anymore. You have already completed your search. You MUST provide a final text response NOW using the information you already gathered. DO NOT attempt to call any functions or tools.`
+          content: `STOP. You have already used your maximum number of web searches (${maxToolCalls}). The webSearch tool is NO LONGER AVAILABLE. You MUST respond with text content NOW using only the information you have already gathered. Do NOT attempt to call any tools.`
         });
 
-        // Continue to next iteration
+        // Continue to next iteration to force text response
         continue;
       }
 
-      // Check if we've already hit the max tool calls limit
-      if (toolCallsCount >= maxToolCalls) {
-        console.log(`⚠️  [DeepInfra Web Search] Max tool calls (${maxToolCalls}) reached. Forcing final response.`);
-
-        // Add a system message to force the model to respond without more tool calls
-        conversationMessages.push({
-          role: 'system',
-          content: `You have reached the maximum number of searches allowed (${maxToolCalls}). You MUST provide a final answer now using the information you have gathered. DO NOT request any more tool calls.`
-        });
-
-        // Continue to next iteration to force a response
-        continue;
-      }
-
-      // Execute tool calls only if under the limit
+      // Execute tool calls (we've already verified we're under the limit above)
       for (const toolCall of assistantMessage.tool_calls) {
         if (toolCall.function.name === 'webSearch') {
-          // Check before each tool call
-          if (toolCallsCount >= maxToolCalls) {
-            console.log(`⚠️  [DeepInfra Web Search] Skipping tool call - max limit reached`);
-            break;
-          }
-
           toolCallsCount++;
           console.log(`🔍 [DeepInfra Web Search] Executing search ${toolCallsCount}/${maxToolCalls}`);
 

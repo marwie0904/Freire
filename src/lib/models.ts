@@ -24,8 +24,8 @@ export const MODEL_OPTIONS: ModelOption[] = [
   {
     value: ACTUAL_MODELS.GPT_OSS_20B,
     label: "FREIRE LITE",
-    description: "Fast & light - best for low level tasks",
-    disabled: false,
+    description: "Temporarily Unavailable - Tool Calling Issues",
+    disabled: true, // DISABLED: GPT-OSS-20B has known tool calling bugs - see deepinfra-web-search.ts for details
   },
   {
     value: ACTUAL_MODELS.GPT_OSS_120B,
@@ -48,4 +48,5 @@ export const MODEL_OPTIONS: ModelOption[] = [
 ];
 
 // Default model if none is selected
-export const DEFAULT_MODEL = ACTUAL_MODELS.GPT_OSS_20B;
+// Changed from GPT_OSS_20B to GPT_OSS_120B_FAST due to tool calling issues with 20B model
+export const DEFAULT_MODEL = ACTUAL_MODELS.GPT_OSS_120B_FAST;
