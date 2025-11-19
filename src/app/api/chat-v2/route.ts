@@ -228,26 +228,31 @@ export async function POST(req: Request) {
           content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
         })),
         {
-          temperature: 0.7,
+          temperature: 0.3,
           maxTokens: 2000,
-          maxIterations: 5
+          maxIterations: 4,
+          maxToolCalls: 2
         }
       );
 
       const text = cerebrasResult.content;
+      console.log('🔍 [API] Cerebras result content type:', typeof text);
+      console.log('🔍 [API] Cerebras result content preview:', text?.substring(0, 200));
+
       const usage = {
         promptTokens: cerebrasResult.usage.promptTokens,
         completionTokens: cerebrasResult.usage.completionTokens,
         totalTokens: cerebrasResult.usage.totalTokens
       };
 
-      // Save assistant message to Convex
+      // Save assistant message to Convex with search metadata
       if (conversationId && text) {
         await convex.mutation(api.messages.create, {
           conversationId: conversationId as Id<"conversations">,
           content: text,
           role: "assistant",
           tokenUsage: usage,
+          searchMetadata: cerebrasResult.searchMetadata,
         });
 
         // Generate title if first exchange
@@ -298,9 +303,13 @@ export async function POST(req: Request) {
 
       // Return the response as a formatted stream
       const encoder = new TextEncoder();
+      const formattedResponse = `0:${JSON.stringify(text)}\n`;
+      console.log('📤 [API] Sending formatted response, length:', formattedResponse.length);
+      console.log('📤 [API] Response preview:', formattedResponse.substring(0, 200));
+
       const customStream = new ReadableStream({
         start(controller) {
-          controller.enqueue(encoder.encode(`0:${JSON.stringify(text)}\n`));
+          controller.enqueue(encoder.encode(formattedResponse));
           controller.close();
         },
       });
