@@ -278,6 +278,29 @@ export async function POST(req: Request) {
 
               console.log('✅ [API] Stream completed');
               controller.close();
+
+              // Generate title after stream completes
+              if (conversationId) {
+                console.log('🎯 [API] Checking if title generation needed...');
+                const conversation = await convex.query(api.conversations.get, {
+                  conversationId: conversationId as Id<"conversations">,
+                });
+
+                console.log('📋 [API] Conversation messageCount:', conversation?.messageCount);
+
+                if (conversation && conversation.messageCount === 2) {
+                  console.log('🏷️  [API] Triggering title generation for first exchange');
+
+                  // Fire and forget - don't block the stream response
+                  convex.action(api.openai.generateTitle, {
+                    conversationId: conversationId as Id<"conversations">,
+                  }).then(() => {
+                    console.log('✅ [API] Title generation completed');
+                  }).catch((err) => {
+                    console.error("❌ [API] Title generation failed:", err);
+                  });
+                }
+              }
             } catch (error) {
               console.error('[API] Stream error:', error);
               controller.error(error);
