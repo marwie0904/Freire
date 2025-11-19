@@ -13,6 +13,9 @@ export function getProviderForModel(modelName: string): string {
     // FREIRE FAST - Cerebras GPT-OSS 120B (AI SDK)
     "cerebras/gpt-oss-120b": "cerebras",
 
+    // FREIRE PRO - GMI Cloud GPT-OSS 120B
+    "gmi/gpt-oss-120b": "gmi",
+
     // FREIRE PLUS - Disabled
     "moonshotai/kimi-k2-thinking": "disabled",
     "kimi/k2-thinking": "disabled",

@@ -78,6 +78,14 @@ export function calculateLLMCost(
       prompt: 0.05,  // gmicloud/fp4 provider
       completion: 0.25,
     },
+    'cerebras/gpt-oss-120b': {
+      prompt: 0,  // Cerebras is currently free
+      completion: 0,
+    },
+    'gmi/gpt-oss-120b': {
+      prompt: 0.05,  // GMI Cloud pricing
+      completion: 0.25,
+    },
     'moonshotai/kimi-k2-thinking': {
       prompt: 0.55,  // chutes/int4 provider (main), fireworks fallback is $0.60/$2.50
       completion: 2.25,

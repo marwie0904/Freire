@@ -5,7 +5,7 @@
 
 import Cerebras from "@cerebras/cerebras_cloud_sdk";
 
-export type ProviderType = "deepinfra" | "gmicloud" | "cerebras";
+export type ProviderType = "deepinfra" | "gmi" | "cerebras";
 
 export interface TokenUsage {
   promptTokens: number;
@@ -156,7 +156,7 @@ export async function streamCompletion(
   messages: any[],
   apiKeys: {
     deepinfra?: string;
-    gmicloud?: string;
+    gmi?: string;
     cerebras?: string;
   },
   temperature: number = 0.7
@@ -166,9 +166,9 @@ export async function streamCompletion(
       if (!apiKeys.deepinfra) throw new Error("DeepInfra API key not configured");
       return completeDeepInfra(messages, apiKeys.deepinfra, temperature);
 
-    case "gmicloud":
-      if (!apiKeys.gmicloud) throw new Error("GMI Cloud API key not configured");
-      return streamGMICloud(messages, apiKeys.gmicloud, temperature);
+    case "gmi":
+      if (!apiKeys.gmi) throw new Error("GMI Cloud API key not configured");
+      return streamGMICloud(messages, apiKeys.gmi, temperature);
 
     case "cerebras":
       if (!apiKeys.cerebras) throw new Error("Cerebras API key not configured");

@@ -1,11 +1,8 @@
-import Cerebras from '@cerebras/cerebras_cloud_sdk';
-
-// Web search tool definition (OpenAI format for Cerebras)
+// Web search tool definition (OpenAI format for GMI Cloud)
 const webSearchTool = {
   type: 'function' as const,
   function: {
     name: 'webSearch',
-    strict: true,
     description: 'Search the web for current information using Google Search. Use this when you need up-to-date information, facts, news, or answers that require recent data.',
     parameters: {
       type: 'object',
@@ -21,16 +18,15 @@ const webSearchTool = {
           maximum: 10
         }
       },
-      required: ['query', 'numResults'],
-      additionalProperties: false
+      required: ['query', 'numResults']
     }
   }
 };
 
 // Execute web search using Serper
 async function executeWebSearch(query: string, numResults: number = 10) {
-  console.log('🔍 [Cerebras Web Search] Executing search for:', query);
-  console.log('📊 [Cerebras Web Search] Requesting', numResults, 'results');
+  console.log('🔍 [GMI Web Search] Executing search for:', query);
+  console.log('📊 [GMI Web Search] Requesting', numResults, 'results');
 
   const response = await fetch('https://google.serper.dev/search', {
     method: 'POST',
@@ -47,7 +43,7 @@ async function executeWebSearch(query: string, numResults: number = 10) {
 
   const data = await response.json();
 
-  console.log('✅ [Cerebras Web Search] Search completed successfully');
+  console.log('✅ [GMI Web Search] Search completed successfully');
 
   return {
     organic: data.organic?.slice(0, numResults).map((result: any) => ({
@@ -70,7 +66,7 @@ export interface SearchMetadata {
   sources: SearchSource[];
 }
 
-export interface CerebrasWebSearchResult {
+export interface GMIWebSearchResult {
   content: string;
   reasoning?: string;
   usage: {
@@ -83,10 +79,10 @@ export interface CerebrasWebSearchResult {
 }
 
 /**
- * Chat with Cerebras using web search tool calling
- * Following the official Cerebras SDK tool calling pattern
+ * Chat with GMI Cloud using web search tool calling
+ * GMI Cloud provides OpenAI-compatible API with reasoning_content field
  */
-export async function chatWithCerebrasWebSearch(
+export async function chatWithGMIWebSearch(
   messages: Array<{ role: string; content: string }>,
   options?: {
     temperature?: number;
@@ -95,11 +91,7 @@ export async function chatWithCerebrasWebSearch(
     maxToolCalls?: number;
     reasoning?: "low" | "high";
   }
-): Promise<CerebrasWebSearchResult> {
-  const cerebras = new Cerebras({
-    apiKey: process.env.CEREBRAS_API_KEY
-  });
-
+): Promise<GMIWebSearchResult> {
   const reasoningLevel = options?.reasoning || "high";
   const maxToolCalls = options?.maxToolCalls || 1;
 
@@ -177,7 +169,7 @@ MINIMIZE TOOL CALLS:
     content: systemPromptContent
   };
 
-  console.log('📋 [Cerebras Web Search] System Prompt:', systemPrompt.content);
+  console.log('📋 [GMI Web Search] System Prompt:', systemPrompt.content);
 
   const conversationMessages: any[] = [systemPrompt, ...messages];
   let iteration = 0;
@@ -191,13 +183,13 @@ MINIMIZE TOOL CALLS:
   let allSources: SearchSource[] = [];
   let searchQueries: string[] = [];
 
-  console.log('🚀 [Cerebras Web Search] Starting conversation with max iterations:', maxIterations);
-  console.log('🧠 [Cerebras Web Search] Reasoning level:', reasoningLevel);
-  console.log('🔒 [Cerebras Web Search] Max tool calls allowed:', maxToolCalls);
+  console.log('🚀 [GMI Web Search] Starting conversation with max iterations:', maxIterations);
+  console.log('🧠 [GMI Web Search] Reasoning level:', reasoningLevel);
+  console.log('🔒 [GMI Web Search] Max tool calls allowed:', maxToolCalls);
 
   while (iteration < maxIterations) {
     iteration++;
-    console.log(`🔄 [Cerebras Web Search] Iteration ${iteration}/${maxIterations}`);
+    console.log(`🔄 [GMI Web Search] Iteration ${iteration}/${maxIterations}`);
 
     // If max tool calls reached, don't offer tools anymore - force final answer
     const shouldOfferTools = toolCallsCount < maxToolCalls;
@@ -210,105 +202,55 @@ MINIMIZE TOOL CALLS:
       });
     }
 
-    // Call Cerebras model with streaming
-    const stream = await cerebras.chat.completions.create({
+    // Call GMI Cloud API
+    const payload = {
+      model: 'openai/gpt-oss-120b',
       messages: conversationMessages,
-      model: 'gpt-oss-120b',
       tools: shouldOfferTools ? [webSearchTool] : undefined,
       tool_choice: shouldOfferTools ? 'auto' : undefined,
-      max_completion_tokens: options?.maxTokens || 2000,
+      max_tokens: options?.maxTokens || 2000,
       temperature: options?.temperature ?? 0.7,
-      stream: true
-    });
-
-    // Initialize assistant message
-    let assistantMessage: any = {
-      role: 'assistant',
-      content: '',
-      tool_calls: []
+      stream: true,
     };
 
-    // Process stream chunks
-    let chunkCount = 0;
-    for await (const chunk of stream) {
-      chunkCount++;
-      console.log(`📦 [Cerebras Web Search] Chunk ${chunkCount} received`);
+    const response = await fetch('https://api.gmi-serving.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.GMI_API_KEY}`
+      },
+      body: JSON.stringify(payload)
+    });
 
-      const delta = chunk.choices[0]?.delta;
-
-      if (!delta) {
-        console.log(`⚠️ [Cerebras Web Search] Chunk ${chunkCount}: No delta`);
-        continue;
-      }
-
-      console.log(`📦 [Cerebras Web Search] Chunk ${chunkCount} delta:`, JSON.stringify(delta));
-
-      // Handle tool calls in stream
-      if (delta.tool_calls) {
-        console.log(`🛠️ [Cerebras Web Search] Chunk ${chunkCount}: Tool call delta detected`);
-        for (const toolCallDelta of delta.tool_calls) {
-          const index = toolCallDelta.index;
-
-          // Initialize tool call if new
-          if (!assistantMessage.tool_calls[index]) {
-            console.log(`🆕 [Cerebras Web Search] Chunk ${chunkCount}: Initializing tool call ${index}`);
-            assistantMessage.tool_calls[index] = {
-              id: toolCallDelta.id || '',
-              type: 'function',
-              function: {
-                name: toolCallDelta.function?.name || '',
-                arguments: ''
-              }
-            };
-          }
-
-          // Accumulate function arguments
-          if (toolCallDelta.function?.arguments) {
-            console.log(`📝 [Cerebras Web Search] Chunk ${chunkCount}: Tool ${index} arguments: "${toolCallDelta.function.arguments}"`);
-            assistantMessage.tool_calls[index].function.arguments +=
-              toolCallDelta.function.arguments;
-          }
-        }
-      }
-
-      // Handle content streaming
-      if (delta.content) {
-        console.log(`📝 [Cerebras Web Search] Chunk ${chunkCount}: Content: "${delta.content}"`);
-        assistantMessage.content += delta.content;
-      }
-
-      // Handle reasoning (if available)
-      if ((delta as any).reasoning) {
-        console.log(`🧠 [Cerebras Web Search] Chunk ${chunkCount}: Reasoning detected`);
-        if (!assistantMessage.reasoning) assistantMessage.reasoning = '';
-        assistantMessage.reasoning += (delta as any).reasoning;
-      }
-
-      // Accumulate usage from final chunk
-      if (chunk.usage) {
-        console.log(`📊 [Cerebras Web Search] Chunk ${chunkCount}: Usage info received`);
-        totalUsage.promptTokens = chunk.usage.prompt_tokens || 0;
-        totalUsage.completionTokens = chunk.usage.completion_tokens || 0;
-        totalUsage.totalTokens = chunk.usage.total_tokens || 0;
-      }
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`GMI API error: ${response.status} - ${errorText}`);
     }
 
-    console.log(`✅ [Cerebras Web Search] Stream complete - Total chunks processed: ${chunkCount}`);
+    const completion = await response.json();
+    const assistantMessage = completion.choices[0].message;
 
-    console.log('🔍 [Cerebras Web Search] Stream complete');
-    console.log('🔍 [Cerebras Web Search] Content length:', assistantMessage.content.length);
-    console.log('🔍 [Cerebras Web Search] Tool calls:', assistantMessage.tool_calls.length);
+    console.log('🔍 [GMI Web Search] Assistant message keys:', Object.keys(assistantMessage));
+    console.log('🔍 [GMI Web Search] Assistant message role:', assistantMessage.role);
+    console.log('🔍 [GMI Web Search] Assistant message content type:', typeof assistantMessage.content);
+
+    // Accumulate token usage
+    if (completion.usage) {
+      totalUsage.promptTokens += completion.usage.prompt_tokens || 0;
+      totalUsage.completionTokens += completion.usage.completion_tokens || 0;
+      totalUsage.totalTokens += completion.usage.total_tokens || 0;
+    }
 
     // Add assistant message to conversation
     conversationMessages.push(assistantMessage);
 
     // Check if there are tool calls
     if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
-      console.log(`🛠️  [Cerebras Web Search] Model requested ${assistantMessage.tool_calls.length} tool call(s)`);
+      console.log(`🛠️  [GMI Web Search] Model requested ${assistantMessage.tool_calls.length} tool call(s)`);
 
       // Check if we've already hit the max tool calls limit
       if (toolCallsCount >= maxToolCalls) {
-        console.log(`⚠️  [Cerebras Web Search] Max tool calls (${maxToolCalls}) reached. Forcing final response.`);
+        console.log(`⚠️  [GMI Web Search] Max tool calls (${maxToolCalls}) reached. Forcing final response.`);
 
         // Add a system message to force the model to respond without more tool calls
         conversationMessages.push({
@@ -325,16 +267,16 @@ MINIMIZE TOOL CALLS:
         if (toolCall.function.name === 'webSearch') {
           // Check before each tool call
           if (toolCallsCount >= maxToolCalls) {
-            console.log(`⚠️  [Cerebras Web Search] Skipping tool call - max limit reached`);
+            console.log(`⚠️  [GMI Web Search] Skipping tool call - max limit reached`);
             break;
           }
 
           toolCallsCount++;
-          console.log(`🔍 [Cerebras Web Search] Executing search ${toolCallsCount}/${maxToolCalls}`);
+          console.log(`🔍 [GMI Web Search] Executing search ${toolCallsCount}/${maxToolCalls}`);
 
           const args = JSON.parse(toolCall.function.arguments);
-          console.log('🔍 [Cerebras Web Search] Search query:', args.query);
-          console.log('🔍 [Cerebras Web Search] Num results requested:', args.numResults || 10);
+          console.log('🔍 [GMI Web Search] Search query:', args.query);
+          console.log('🔍 [GMI Web Search] Num results requested:', args.numResults || 10);
 
           const searchResults = await executeWebSearch(args.query, args.numResults || 10);
 
@@ -367,12 +309,12 @@ MINIMIZE TOOL CALLS:
 
     // No tool calls, we have final response
     if (assistantMessage.content) {
-      console.log('✅ [Cerebras Web Search] Final response generated');
-      console.log('📝 [Cerebras Web Search] Content type:', typeof assistantMessage.content);
-      console.log('📝 [Cerebras Web Search] Content preview:', assistantMessage.content.substring(0, 200));
-      console.log(`📊 [Cerebras Web Search] Total usage: ${totalUsage.totalTokens} tokens (${totalUsage.promptTokens} prompt + ${totalUsage.completionTokens} completion)`);
-      console.log(`🛠️  [Cerebras Web Search] Tool calls made: ${toolCallsCount}`);
-      console.log(`📚 [Cerebras Web Search] Sources collected: ${allSources.length}`);
+      console.log('✅ [GMI Web Search] Final response generated');
+      console.log('📝 [GMI Web Search] Content type:', typeof assistantMessage.content);
+      console.log('📝 [GMI Web Search] Content preview:', assistantMessage.content.substring(0, 200));
+      console.log(`📊 [GMI Web Search] Total usage: ${totalUsage.totalTokens} tokens (${totalUsage.promptTokens} prompt + ${totalUsage.completionTokens} completion)`);
+      console.log(`🛠️  [GMI Web Search] Tool calls made: ${toolCallsCount}`);
+      console.log(`📚 [GMI Web Search] Sources collected: ${allSources.length}`);
 
       // Build search metadata if sources were found
       const searchMetadata: SearchMetadata | undefined = allSources.length > 0
@@ -382,9 +324,16 @@ MINIMIZE TOOL CALLS:
           }
         : undefined;
 
+      // GMI uses reasoning_content field instead of reasoning
+      const reasoning = (assistantMessage as any).reasoning_content;
+
+      // Filter out GMI control tokens from final content
+      const controlTokenPattern = /<\|[^|]+\|>/g;
+      const cleanedContent = assistantMessage.content.replace(controlTokenPattern, '').trim();
+
       return {
-        content: assistantMessage.content,
-        reasoning: (assistantMessage as any).reasoning,
+        content: cleanedContent,
+        reasoning,
         usage: totalUsage,
         toolCalls: toolCallsCount,
         searchMetadata
@@ -399,10 +348,10 @@ MINIMIZE TOOL CALLS:
 }
 
 /**
- * Streaming version that yields text chunks in real-time
- * This allows the API route to forward chunks to the frontend immediately
+ * Streaming version of chatWithGMIWebSearch
+ * Yields content chunks in real-time as they arrive from GMI Cloud API
  */
-export async function* streamCerebrasWebSearch(
+export async function* streamGMIWebSearch(
   messages: Array<{ role: string; content: string }>,
   options?: {
     temperature?: number;
@@ -411,11 +360,7 @@ export async function* streamCerebrasWebSearch(
     maxToolCalls?: number;
     reasoning?: "low" | "high";
   }
-): AsyncGenerator<{ type: 'content' | 'metadata', data: string | { usage: any; searchMetadata?: SearchMetadata; toolCalls: number } }> {
-  const cerebras = new Cerebras({
-    apiKey: process.env.CEREBRAS_API_KEY
-  });
-
+): AsyncGenerator<{ type: 'content' | 'metadata', data: string | { usage: any; searchMetadata?: SearchMetadata; toolCalls: number; reasoning?: string } }> {
   const reasoningLevel = options?.reasoning || "high";
   const maxToolCalls = options?.maxToolCalls || 1;
 
@@ -493,7 +438,7 @@ MINIMIZE TOOL CALLS:
     content: systemPromptContent
   };
 
-  console.log('📋 [Cerebras Stream] System Prompt:', systemPrompt.content);
+  console.log('📋 [GMI Web Search Stream] System Prompt:', systemPrompt.content);
 
   const conversationMessages: any[] = [systemPrompt, ...messages];
   let iteration = 0;
@@ -506,133 +451,172 @@ MINIMIZE TOOL CALLS:
   };
   let allSources: SearchSource[] = [];
   let searchQueries: string[] = [];
+  let reasoningContent: string | undefined;
 
-  console.log('🚀 [Cerebras Stream] Starting conversation with max iterations:', maxIterations);
-  console.log('🧠 [Cerebras Stream] Reasoning level:', reasoningLevel);
-  console.log('🔒 [Cerebras Stream] Max tool calls allowed:', maxToolCalls);
+  console.log('🚀 [GMI Web Search Stream] Starting conversation with max iterations:', maxIterations);
+  console.log('🧠 [GMI Web Search Stream] Reasoning level:', reasoningLevel);
+  console.log('🔒 [GMI Web Search Stream] Max tool calls allowed:', maxToolCalls);
 
   while (iteration < maxIterations) {
     iteration++;
-    console.log(`🔄 [Cerebras Stream] Iteration ${iteration}/${maxIterations}`);
+    console.log(`🔄 [GMI Web Search Stream] Iteration ${iteration}/${maxIterations}`);
+
+    // 🔑 KEY FIX: Add user instruction when limit is reached (not system message)
+    if (toolCallsCount >= maxToolCalls && conversationMessages[conversationMessages.length - 1].role !== 'user') {
+      conversationMessages.push({
+        role: 'user',
+        content: 'Please provide your final answer based on the search results you have gathered. Do not attempt any more searches.'
+      });
+    }
 
     // If max tool calls reached, don't offer tools anymore - force final answer
     const shouldOfferTools = toolCallsCount < maxToolCalls;
 
-    // If we've hit the tool call limit, add a strong directive to answer now
-    if (!shouldOfferTools && iteration > 1) {
-      conversationMessages.push({
-        role: 'system',
-        content: `You have completed ${maxToolCalls} searches and gathered sufficient information. You MUST now provide a comprehensive final answer to the user's question using ONLY the search results you have already received. DO NOT request any more searches. DO NOT say you need to search. Provide a complete answer NOW based on the information you have.`
-      });
+    // Call GMI Cloud API with streaming
+    // Build request body
+    const payload: any = {
+      model: 'openai/gpt-oss-120b',
+      messages: conversationMessages,
+      max_tokens: options?.maxTokens || 2000,
+      temperature: options?.temperature ?? 0.7,
+      stream: true,
+    };
+
+    // Only add tools if under limit (don't set tool_choice at all when tools removed)
+    if (shouldOfferTools) {
+      payload.tools = [webSearchTool];
+      payload.tool_choice = 'auto';
     }
 
-    // Call Cerebras model with streaming
-    const stream = await cerebras.chat.completions.create({
-      messages: conversationMessages,
-      model: 'gpt-oss-120b',
-      tools: shouldOfferTools ? [webSearchTool] : undefined,
-      tool_choice: shouldOfferTools ? 'auto' : undefined,
-      max_completion_tokens: options?.maxTokens || 2000,
-      temperature: options?.temperature ?? 0.7,
-      stream: true
+    const response = await fetch('https://api.gmi-serving.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.GMI_API_KEY}`
+      },
+      body: JSON.stringify(payload)
     });
 
-    // Initialize assistant message
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`GMI API error: ${response.status} - ${errorText}`);
+    }
+
+    // Parse streaming response (Server-Sent Events format)
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body reader available');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
     let assistantMessage: any = {
       role: 'assistant',
       content: '',
       tool_calls: []
     };
 
-    // Process stream chunks - forward content immediately
-    let chunkCount = 0;
-    for await (const chunk of stream) {
-      chunkCount++;
-      const delta = chunk.choices[0]?.delta;
+    // Process stream chunks
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-      if (!delta) continue;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-      // Handle tool calls in stream (accumulate, don't forward)
-      if (delta.tool_calls) {
-        for (const toolCallDelta of delta.tool_calls) {
-          const index = toolCallDelta.index;
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') continue;
 
-          if (!assistantMessage.tool_calls[index]) {
-            assistantMessage.tool_calls[index] = {
-              id: toolCallDelta.id || '',
-              type: 'function',
-              function: {
-                name: toolCallDelta.function?.name || '',
-                arguments: ''
+          try {
+            const parsed = JSON.parse(data);
+            const delta = parsed.choices[0]?.delta;
+
+            if (!delta) continue;
+
+            // Accumulate token usage
+            if (parsed.usage) {
+              totalUsage.promptTokens += parsed.usage.prompt_tokens || 0;
+              totalUsage.completionTokens += parsed.usage.completion_tokens || 0;
+              totalUsage.totalTokens += parsed.usage.total_tokens || 0;
+            }
+
+            // Handle reasoning content (GMI uses reasoning_content field)
+            if (delta.reasoning_content) {
+              reasoningContent = (reasoningContent || '') + delta.reasoning_content;
+              console.log(`🧠 [GMI Web Search Stream] Reasoning chunk: "${delta.reasoning_content}"`);
+            }
+
+            // Handle tool calls
+            if (delta.tool_calls) {
+              for (const toolCallDelta of delta.tool_calls) {
+                const index = toolCallDelta.index;
+
+                // Initialize tool call if needed
+                if (!assistantMessage.tool_calls[index]) {
+                  assistantMessage.tool_calls[index] = {
+                    id: toolCallDelta.id || '',
+                    type: 'function',
+                    function: {
+                      name: '',
+                      arguments: ''
+                    }
+                  };
+                }
+
+                // Accumulate tool call data
+                if (toolCallDelta.id) {
+                  assistantMessage.tool_calls[index].id = toolCallDelta.id;
+                }
+                if (toolCallDelta.function?.name) {
+                  assistantMessage.tool_calls[index].function.name += toolCallDelta.function.name;
+                }
+                if (toolCallDelta.function?.arguments) {
+                  assistantMessage.tool_calls[index].function.arguments += toolCallDelta.function.arguments;
+                }
               }
-            };
-          }
+            }
 
-          if (toolCallDelta.function?.arguments) {
-            assistantMessage.tool_calls[index].function.arguments +=
-              toolCallDelta.function.arguments;
+            // Handle content streaming - yield immediately (no filtering)
+            if (delta.content) {
+              assistantMessage.content += delta.content;
+              console.log(`📤 [GMI Web Search Stream] Content chunk: "${delta.content}"`);
+              yield { type: 'content', data: delta.content };
+            }
+          } catch (e) {
+            console.error('[GMI Web Search Stream] Error parsing chunk:', e);
           }
         }
       }
-
-      // Handle content streaming - YIELD immediately to frontend
-      if (delta.content) {
-        console.log(`📝 [Cerebras Stream] Yielding content chunk: "${delta.content}"`);
-        yield { type: 'content', data: delta.content };
-        assistantMessage.content += delta.content;
-      }
-
-      // Handle reasoning (if available) - accumulate but don't forward
-      if ((delta as any).reasoning) {
-        if (!assistantMessage.reasoning) assistantMessage.reasoning = '';
-        assistantMessage.reasoning += (delta as any).reasoning;
-      }
-
-      // Accumulate usage from final chunk
-      if (chunk.usage) {
-        totalUsage.promptTokens = chunk.usage.prompt_tokens || 0;
-        totalUsage.completionTokens = chunk.usage.completion_tokens || 0;
-        totalUsage.totalTokens = chunk.usage.total_tokens || 0;
-      }
     }
 
-    console.log(`✅ [Cerebras Stream] Stream iteration complete - chunks: ${chunkCount}`);
+    console.log('🔍 [GMI Web Search Stream] Assistant message content length:', assistantMessage.content.length);
+    console.log('🔍 [GMI Web Search Stream] Tool calls:', assistantMessage.tool_calls.length);
 
     // Add assistant message to conversation
     conversationMessages.push(assistantMessage);
 
+    // Clean up empty tool calls
+    assistantMessage.tool_calls = assistantMessage.tool_calls.filter((tc: any) => tc.id);
+    if (assistantMessage.tool_calls.length === 0) {
+      delete assistantMessage.tool_calls;
+    }
+
     // Check if there are tool calls
     if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
-      console.log(`🛠️  [Cerebras Stream] Model requested ${assistantMessage.tool_calls.length} tool call(s)`);
+      console.log(`🛠️  [GMI Web Search Stream] Model requested ${assistantMessage.tool_calls.length} tool call(s)`);
 
-      // Check if we've already hit the max tool calls limit
-      if (toolCallsCount >= maxToolCalls) {
-        console.log(`⚠️  [Cerebras Stream] Max tool calls (${maxToolCalls}) reached. Forcing final response.`);
+      // Increment counter
+      toolCallsCount += assistantMessage.tool_calls.length;
 
-        // Add a system message to force the model to respond without more tool calls
-        conversationMessages.push({
-          role: 'system',
-          content: `You have reached the maximum number of searches allowed (${maxToolCalls}). You MUST provide a final answer now using the information you have gathered. DO NOT request any more tool calls.`
-        });
-
-        // Continue to next iteration to force a response
-        continue;
-      }
-
-      // Execute tool calls only if under the limit
+      // Execute tool calls
       for (const toolCall of assistantMessage.tool_calls) {
         if (toolCall.function.name === 'webSearch') {
-          // Check before each tool call
-          if (toolCallsCount >= maxToolCalls) {
-            console.log(`⚠️  [Cerebras Stream] Skipping tool call - max limit reached`);
-            break;
-          }
-
-          toolCallsCount++;
-          console.log(`🔍 [Cerebras Stream] Executing search ${toolCallsCount}/${maxToolCalls}`);
-
           const args = JSON.parse(toolCall.function.arguments);
-          console.log('🔍 [Cerebras Stream] Search query:', args.query);
+          console.log('🔍 [GMI Web Search Stream] Search query:', args.query);
+          console.log('🔍 [GMI Web Search Stream] Num results requested:', args.numResults || 10);
 
           const searchResults = await executeWebSearch(args.query, args.numResults || 10);
 
@@ -663,12 +647,13 @@ MINIMIZE TOOL CALLS:
       continue;
     }
 
-    // No tool calls, we have final response - yield metadata and finish
+    // No tool calls, we have final response
     if (assistantMessage.content) {
-      console.log('✅ [Cerebras Stream] Final response complete');
-      console.log(`📊 [Cerebras Stream] Total usage: ${totalUsage.totalTokens} tokens`);
-      console.log(`🛠️  [Cerebras Stream] Tool calls made: ${toolCallsCount}`);
-      console.log(`📚 [Cerebras Stream] Sources collected: ${allSources.length}`);
+      console.log('✅ [GMI Web Search Stream] Final response generated');
+      console.log('📝 [GMI Web Search Stream] Content length:', assistantMessage.content.length);
+      console.log(`📊 [GMI Web Search Stream] Total usage: ${totalUsage.totalTokens} tokens (${totalUsage.promptTokens} prompt + ${totalUsage.completionTokens} completion)`);
+      console.log(`🛠️  [GMI Web Search Stream] Tool calls made: ${toolCallsCount}`);
+      console.log(`📚 [GMI Web Search Stream] Sources collected: ${allSources.length}`);
 
       // Build search metadata if sources were found
       const searchMetadata: SearchMetadata | undefined = allSources.length > 0
@@ -684,7 +669,8 @@ MINIMIZE TOOL CALLS:
         data: {
           usage: totalUsage,
           searchMetadata,
-          toolCalls: toolCallsCount
+          toolCalls: toolCallsCount,
+          reasoning: reasoningContent
         }
       };
 

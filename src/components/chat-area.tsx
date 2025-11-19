@@ -94,6 +94,9 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
   // Mutation for file uploads
   const generateUploadUrl = useMutation(api.messageFiles.generateUploadUrl);
 
+  // Mutation for saving assistant messages after streaming
+  const saveMessage = useMutation(api.messages.create);
+
   // Manual message state management
   const [messages, setMessages] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -152,6 +155,7 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
 
       let fullText = '';
       let chunkCount = 0;
+      let metadata: any = null;
 
       console.log('🚀 [Stream] Starting stream reading...');
 
@@ -165,7 +169,7 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
         const chunk = decoder.decode(value, { stream: true });
         chunkCount++;
 
-        // Parse AI SDK stream format: 0:"text"
+        // Parse AI SDK stream format: 0:"text", d:{metadata}
         const lines = chunk.split('\n').filter(line => line.trim());
         for (const line of lines) {
           if (line.startsWith('0:')) {
@@ -176,6 +180,14 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
               if (!isStreaming) setIsStreaming(true);
             } catch (e) {
               console.warn('Failed to parse chunk:', line);
+            }
+          } else if (line.startsWith('d:')) {
+            // Handle metadata (usage, search sources, etc.)
+            try {
+              metadata = JSON.parse(line.substring(2));
+              console.log('📊 [Stream] Received metadata:', metadata);
+            } catch (e) {
+              console.warn('Failed to parse metadata:', line);
             }
           } else if (line.startsWith('data:')) {
             // Handle SSE format (for backwards compatibility)
@@ -195,9 +207,27 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
         );
       }
 
-      // Don't refetch from Convex - it causes UI to reset and show everything simultaneously
-      // The useEffect with convexMessages dependency will handle syncing when needed
-      console.log('✅ [Stream] Streaming complete, NOT refetching from Convex');
+      console.log('✅ [Stream] Streaming complete, saving to Convex...');
+
+      // Save to Convex after streaming completes
+      if (conversationId && fullText && metadata) {
+        try {
+          await saveMessage({
+            conversationId: conversationId,
+            content: fullText,
+            role: 'assistant',
+            tokenUsage: {
+              promptTokens: metadata.usage.promptTokens,
+              completionTokens: metadata.usage.completionTokens,
+              totalTokens: metadata.usage.totalTokens,
+            },
+            searchMetadata: metadata.searchMetadata,
+          });
+          console.log('✅ [Stream] Saved to Convex successfully');
+        } catch (error) {
+          console.error('[Stream] Error saving to Convex:', error);
+        }
+      }
     } catch (error) {
       console.error('Streaming error:', error);
     } finally {
@@ -224,8 +254,8 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
 
   // Load conversation history when conversationId changes (only when not streaming)
   useEffect(() => {
-    // Don't update messages while streaming to prevent flicker
-    if (isLoading) return;
+    // Don't update messages while streaming or loading to prevent flicker
+    if (isLoading || isStreaming) return;
 
     if (convexMessages) {
       const formattedMessages = convexMessages.map((msg) => ({
@@ -650,32 +680,48 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-56">
-                      <DropdownMenuItem
-                        onSelect={(e) => e.preventDefault()}
-                        onClick={() => setUseHighReasoning(!useHighReasoning)}
-                        className="flex items-center justify-between cursor-pointer"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Timer className="h-4 w-4" />
-                          <span>Extended Thinking</span>
-                        </div>
-                        <div className={`h-4 w-8 rounded-full transition-colors ${useHighReasoning ? 'bg-primary' : 'bg-muted'} relative`}>
-                          <div className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${useHighReasoning ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                        </div>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onSelect={(e) => e.preventDefault()}
-                        disabled
-                        className="flex items-center justify-between cursor-not-allowed opacity-50"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Search className="h-4 w-4" />
-                          <span>Research Mode</span>
-                        </div>
-                        <div className={`h-4 w-8 rounded-full transition-colors bg-muted relative`}>
-                          <div className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform translate-x-0.5`} />
-                        </div>
-                      </DropdownMenuItem>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <DropdownMenuItem
+                              onSelect={(e) => e.preventDefault()}
+                              onClick={() => setUseHighReasoning(!useHighReasoning)}
+                              className="flex items-center justify-between cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Timer className="h-4 w-4" />
+                                <span>Extended Thinking</span>
+                              </div>
+                              <div className={`h-4 w-8 rounded-full transition-colors ${useHighReasoning ? 'bg-primary' : 'bg-muted'} relative`}>
+                                <div className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${useHighReasoning ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                              </div>
+                            </DropdownMenuItem>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" className="max-w-xs">
+                            Increases web searches and enables deeper reasoning. <strong>Consumes more usage.</strong>
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <DropdownMenuItem
+                              onSelect={(e) => e.preventDefault()}
+                              disabled
+                              className="flex items-center justify-between cursor-not-allowed opacity-50"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Search className="h-4 w-4" />
+                                <span>Research Mode</span>
+                              </div>
+                              <div className={`h-4 w-8 rounded-full transition-colors bg-muted relative`}>
+                                <div className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform translate-x-0.5`} />
+                              </div>
+                            </DropdownMenuItem>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" className="max-w-xs">
+                            Conducts comprehensive research with 5 web searches and detailed analysis. <strong>Consumes significantly more usage</strong> due to extensive context and reasoning.
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                       <DropdownMenuItem
                         onClick={() => setIsCreateTestOpen(true)}
                         disabled={!conversationId || messages.length === 0}
@@ -711,23 +757,42 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      {MODEL_OPTIONS.map((model, index) => (
-                        <DropdownMenuItem
-                          key={`${model.value}-${index}`}
-                          onClick={() => !model.disabled && setSelectedModel(model)}
-                          disabled={model.disabled}
-                          className={model.disabled ? 'opacity-50 cursor-not-allowed' : ''}
-                        >
-                          <div className="flex flex-col gap-0.5">
-                            <span>{model.label}</span>
-                            {model.description && (
-                              <span className="text-xs text-muted-foreground">
-                                {model.description}
-                              </span>
-                            )}
-                          </div>
-                        </DropdownMenuItem>
-                      ))}
+                      <TooltipProvider>
+                        {MODEL_OPTIONS.map((model, index) => {
+                          const menuItem = (
+                            <DropdownMenuItem
+                              key={`${model.value}-${index}`}
+                              onClick={() => !model.disabled && setSelectedModel(model)}
+                              disabled={model.disabled}
+                              className={model.disabled ? 'opacity-50 cursor-not-allowed' : ''}
+                            >
+                              <div className="flex flex-col gap-0.5">
+                                <span>{model.label}</span>
+                                {model.description && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {model.description}
+                                  </span>
+                                )}
+                              </div>
+                            </DropdownMenuItem>
+                          );
+
+                          if (model.tooltip) {
+                            return (
+                              <Tooltip key={`${model.value}-${index}`}>
+                                <TooltipTrigger asChild>
+                                  {menuItem}
+                                </TooltipTrigger>
+                                <TooltipContent side="left" className="max-w-xs whitespace-pre-line">
+                                  {model.tooltip}
+                                </TooltipContent>
+                              </Tooltip>
+                            );
+                          }
+
+                          return menuItem;
+                        })}
+                      </TooltipProvider>
                     </DropdownMenuContent>
                   </DropdownMenu>
 

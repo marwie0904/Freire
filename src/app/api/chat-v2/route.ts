@@ -7,8 +7,9 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { trackLLMCallServer, calculateLLMCost } from "@/lib/analytics/llm-tracking";
 import { usdToPhp } from "@/lib/currency";
 import { getProviderForModel } from "@/lib/provider-helper";
-import { chatWithCerebrasWebSearch } from "@/lib/cerebras-web-search";
+import { chatWithCerebrasWebSearch, streamCerebrasWebSearch } from "@/lib/cerebras-web-search";
 import { chatWithDeepInfraWebSearch } from "@/lib/deepinfra-web-search";
+import { chatWithGMIWebSearch, streamGMIWebSearch } from "@/lib/gmi-web-search";
 
 // Allow streaming responses up to 30 seconds
 export const maxDuration = 30;
@@ -145,9 +146,10 @@ export async function POST(req: Request) {
     const defaultModel = "cerebras/gpt-oss-120b";
 
     // Get provider type for model
-    const getProviderType = (modelName: string): "cerebras" | "deepinfra" | "disabled" => {
+    const getProviderType = (modelName: string): "cerebras" | "deepinfra" | "disabled" | "gmi" => {
       if (modelName === "openai/gpt-oss-20b") return "deepinfra"; // FREIRE LITE
-      if (modelName === "cerebras/gpt-oss-120b") return "cerebras"; // FREIRE FAST
+      if (modelName === "cerebras/gpt-oss-120b") return "cerebras"; // FREIRE FLASH
+      if (modelName === "gmi/gpt-oss-120b") return "gmi"; // FREIRE (GMI Cloud)
       if (modelName === "openai/gpt-oss-120b") return "disabled"; // FREIRE (original) - disabled
       return "cerebras"; // Default to Cerebras
     };
@@ -218,7 +220,7 @@ export async function POST(req: Request) {
                                userMessageContent.toLowerCase().includes('current') ||
                                userMessageContent.toLowerCase().includes('latest') ||
                                userMessageContent.toLowerCase().includes('recent');
-    const useWebSearch = isWebSearchRequest && (providerType === "cerebras" || providerType === "deepinfra");
+    const useWebSearch = isWebSearchRequest && (providerType === "cerebras" || providerType === "deepinfra" || providerType === "gmi");
 
     if (useWebSearch) {
       console.log(`🔍 [Web Search] Detected web search request with ${providerType}, using tool calling`);
@@ -231,24 +233,70 @@ export async function POST(req: Request) {
 
       console.log(`🧠 [Extended Thinking] Reasoning level: ${reasoningLevel}, Max tool calls: ${maxToolCalls}`);
 
-      // Use appropriate SDK for tool calling (non-streaming)
+      // Use streaming for Cerebras and GMI
+      if (providerType === "cerebras" || providerType === "gmi") {
+        console.log(`🌊 [API] Using streaming ${providerType} web search`);
+
+        // Stream responses in real-time without backend Convex saves
+        const encoder = new TextEncoder();
+
+        const customStream = new ReadableStream({
+          async start(controller) {
+            try {
+              // Choose streaming function based on provider
+              const streamFunction = providerType === "cerebras"
+                ? streamCerebrasWebSearch
+                : streamGMIWebSearch;
+
+              const stream = streamFunction(
+                coreMessages.map(msg => ({
+                  role: msg.role,
+                  content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+                })),
+                {
+                  temperature: 0.3,
+                  maxTokens: 2000,
+                  maxIterations: 4,
+                  maxToolCalls,
+                  reasoning: reasoningLevel
+                }
+              );
+
+              for await (const chunk of stream) {
+                if (chunk.type === 'content') {
+                  // Forward content chunks immediately to frontend
+                  const formatted = `0:${JSON.stringify(chunk.data)}\n`;
+                  controller.enqueue(encoder.encode(formatted));
+                  console.log(`📤 [API] Streamed chunk: "${chunk.data}"`);
+                } else if (chunk.type === 'metadata') {
+                  // Send metadata as a special message type
+                  const metadataMsg = `d:${JSON.stringify(chunk.data)}\n`;
+                  controller.enqueue(encoder.encode(metadataMsg));
+                  console.log('📊 [API] Sent metadata to client');
+                }
+              }
+
+              console.log('✅ [API] Stream completed');
+              controller.close();
+            } catch (error) {
+              console.error('[API] Stream error:', error);
+              controller.error(error);
+            }
+          },
+        });
+
+        return new Response(customStream, {
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        });
+      }
+
+      // Non-streaming fallback for DeepInfra
       let webSearchResult;
 
-      if (providerType === "cerebras") {
-        webSearchResult = await chatWithCerebrasWebSearch(
-          coreMessages.map(msg => ({
-            role: msg.role,
-            content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
-          })),
-          {
-            temperature: 0.3,
-            maxTokens: 2000,
-            maxIterations: 4,
-            maxToolCalls,
-            reasoning: reasoningLevel
-          }
-        );
-      } else if (providerType === "deepinfra") {
+      if (providerType === "deepinfra") {
         webSearchResult = await chatWithDeepInfraWebSearch(
           coreMessages.map(msg => ({
             role: msg.role,
