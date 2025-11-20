@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { useMutation } from 'convex/react'
+import { useMutation, useQuery } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -25,6 +25,7 @@ export function FeatureRequestModal({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [mounted, setMounted] = useState(false)
 
+  const currentUser = useQuery(api.users.current)
   const createFeatureRequest = useMutation(api.featureRequests.create)
 
   // Ensure component is mounted (client-side only)
@@ -43,12 +44,12 @@ export function FeatureRequestModal({
     setIsSubmitting(true)
 
     try {
-      // Create feature request in Convex with placeholder user data
+      // Create feature request in Convex with actual user data
       await createFeatureRequest({
         title: title.trim(),
         description: description.trim(),
-        userName: 'John Doe',
-        userEmail: 'john.doe@example.com',
+        userName: currentUser?.name,
+        userEmail: currentUser?.email,
       })
 
       toast.success('Feature request submitted!')

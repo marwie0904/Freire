@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getCurrentUserOrThrow } from "./lib/auth";
+import { checkRateLimit } from "./lib/rateLimit";
 
 // Token limit per conversation (output tokens only)
 const OUTPUT_TOKEN_LIMIT = 50000;
@@ -113,6 +114,9 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const user = await getCurrentUserOrThrow(ctx);
+
+    // Apply rate limiting (1 request per second per user)
+    await checkRateLimit(ctx, user._id);
 
     // Get current conversation and verify ownership
     const conversation = await ctx.db.get(args.conversationId);

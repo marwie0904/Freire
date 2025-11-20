@@ -9,7 +9,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 
@@ -33,6 +33,7 @@ export function FlagFeedback({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
+  const currentUser = useQuery(api.users.current);
   const submitFeedback = useMutation(api.responseFeedback.submit);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -47,6 +48,8 @@ export function FlagFeedback({
         userQuestion,
         aiResponse,
         aiModel,
+        userName: currentUser?.name,
+        userEmail: currentUser?.email,
         messageId: messageId as Id<"messages"> | undefined,
         conversationId,
       });

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { useMutation } from 'convex/react'
+import { useMutation, useQuery } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import { Id } from '../../../convex/_generated/dataModel'
 import { Input } from '@/components/ui/input'
@@ -28,6 +28,7 @@ export function BugReportModal({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [mounted, setMounted] = useState(false)
 
+  const currentUser = useQuery(api.users.current)
   const createBugReport = useMutation(api.bugReports.create)
 
   // Ensure component is mounted (client-side only)
@@ -52,6 +53,8 @@ export function BugReportModal({
       const bugReportId = await createBugReport({
         title: title.trim(),
         description: description.trim(),
+        userName: currentUser?.name,
+        userEmail: currentUser?.email,
       })
 
       // Ensure PostHog session recording is active

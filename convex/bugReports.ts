@@ -9,6 +9,8 @@ export const create = mutation({
   args: {
     title: v.string(),
     description: v.string(),
+    userName: v.optional(v.string()),
+    userEmail: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await getCurrentUserOrThrow(ctx);
@@ -19,6 +21,8 @@ export const create = mutation({
       title: args.title,
       description: args.description,
       status: "pending",
+      userName: args.userName,
+      userEmail: args.userEmail,
       createdAt: now,
       updatedAt: now,
     });

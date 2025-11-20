@@ -247,6 +247,8 @@ export default defineSchema({
     notes: v.optional(v.string()),
     sessionRecordingUrl: v.optional(v.string()),
     posthogSessionId: v.optional(v.string()),
+    userName: v.optional(v.string()),
+    userEmail: v.optional(v.string()),
 
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -357,4 +359,9 @@ export default defineSchema({
   })
     .index("by_email", ["email"])
     .index("by_created", ["createdAt"]),
+
+  rateLimits: defineTable({
+    userId: v.id("users"),
+    lastRequestTime: v.number(),
+  }).index("by_user", ["userId"]),
 });

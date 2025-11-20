@@ -99,6 +99,7 @@ export function Sidebar({
   const conversations = useQuery(api.conversations.list);
   const projects = useQuery(api.projects.list);
   const allTests = useQuery(api.tests.list);
+  const currentUser = useQuery(api.users.current);
 
   // Check if any test is currently generating
   const hasGeneratingTest = allTests?.some(test => test.isGenerating) || false;
@@ -225,6 +226,21 @@ export function Sidebar({
     if (hours < 24) return `${hours}h ago`;
     if (days < 7) return `${days}d ago`;
     return new Date(timestamp).toLocaleDateString();
+  };
+
+  const getInitials = (name?: string, email?: string) => {
+    if (name) {
+      return name
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2);
+    }
+    if (email) {
+      return email[0].toUpperCase();
+    }
+    return "U";
   };
 
   // Filter conversations based on search query
@@ -589,12 +605,14 @@ export function Sidebar({
             >
               <Avatar className="h-8 w-8">
                 <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-                  MW
+                  {getInitials(currentUser?.name, currentUser?.email)}
                 </AvatarFallback>
               </Avatar>
               <div className="flex flex-1 flex-col items-start text-left">
-                <span className="text-sm font-medium text-sidebar-text">Mar Wie Ang</span>
-                <span className="text-xs text-sidebar-text opacity-70">Free plan</span>
+                <span className="text-sm font-medium text-sidebar-text">
+                  {currentUser?.name || currentUser?.email || "User"}
+                </span>
+                <span className="text-xs text-sidebar-text opacity-70">Alpha Test</span>
               </div>
               <ChevronDown className="h-4 w-4 text-sidebar-text" />
             </Button>

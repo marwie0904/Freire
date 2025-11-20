@@ -21,6 +21,7 @@ import type * as featureRequests from "../featureRequests.js";
 import type * as gemini from "../gemini.js";
 import type * as http from "../http.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_rateLimit from "../lib/rateLimit.js";
 import type * as messageFiles from "../messageFiles.js";
 import type * as messages from "../messages.js";
 import type * as openai from "../openai.js";
@@ -52,6 +53,7 @@ declare const fullApi: ApiFromModules<{
   gemini: typeof gemini;
   http: typeof http;
   "lib/auth": typeof lib_auth;
+  "lib/rateLimit": typeof lib_rateLimit;
   messageFiles: typeof messageFiles;
   messages: typeof messages;
   openai: typeof openai;
