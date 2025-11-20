@@ -468,17 +468,50 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
     }
   }, [convexMessages, conversationId]); // Removed isLoading, isStreaming to prevent re-run when stream ends
 
-  // Auto-scroll to bottom when new messages arrive
+  // Track if user has scrolled up manually
+  const [isUserScrolling, setIsUserScrolling] = useState(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Detect when user manually scrolls
   useEffect(() => {
-    // Scroll to bottom using the viewport element
+    const viewport = scrollViewportRef.current;
+    if (!viewport) return;
+
+    const handleScroll = () => {
+      const isAtBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 100;
+
+      // If user scrolls up, disable auto-scroll
+      if (!isAtBottom) {
+        setIsUserScrolling(true);
+
+        // Clear existing timeout
+        if (scrollTimeoutRef.current) {
+          clearTimeout(scrollTimeoutRef.current);
+        }
+      } else {
+        // User scrolled back to bottom, re-enable auto-scroll
+        setIsUserScrolling(false);
+      }
+    };
+
+    viewport.addEventListener('scroll', handleScroll);
+    return () => viewport.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Auto-scroll to bottom when new messages arrive (only if user hasn't scrolled up)
+  useEffect(() => {
+    if (isUserScrolling) return; // Don't auto-scroll if user is reading
+
     if (scrollViewportRef.current) {
       const viewport = scrollViewportRef.current;
+
+      // Use smooth scroll during streaming, instant when not streaming
       viewport.scrollTo({
         top: viewport.scrollHeight,
-        behavior: "smooth"
+        behavior: isStreaming ? "smooth" : "auto"
       });
     }
-  }, [messages]);
+  }, [messages, isUserScrolling, isStreaming]);
 
   // Auto-resize textarea based on content - debounced to reduce layout calculations
   useEffect(() => {
