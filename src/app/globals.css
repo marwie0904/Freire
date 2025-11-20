@@ -523,32 +523,23 @@
   0% {
     transform: rotateX(0deg) rotateY(0deg);
   }
-  25% {
-    transform: rotateX(180deg) rotateY(90deg);
-  }
-  50% {
-    transform: rotateX(180deg) rotateY(180deg);
-  }
-  75% {
-    transform: rotateX(360deg) rotateY(270deg);
-  }
   100% {
     transform: rotateX(360deg) rotateY(360deg);
   }
 }
 
 .animate-cube-rotate {
-  animation: cube-rotate 3s ease-in-out infinite;
+  animation: cube-rotate 3s linear infinite;
   transform-style: preserve-3d;
 }
 
 .animate-cube-rotate-slow {
-  animation: cube-rotate 4s ease-in-out infinite;
+  animation: cube-rotate 4s linear infinite;
   transform-style: preserve-3d;
 }
 
 .animate-cube-rotate-fast {
-  animation: cube-rotate 2s ease-in-out infinite;
+  animation: cube-rotate 2s linear infinite;
   transform-style: preserve-3d;
 }
 

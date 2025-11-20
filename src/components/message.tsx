@@ -652,13 +652,6 @@ export const Message = memo(function Message({
             </div>
           )}
         </div>
-
-        {/* Token Usage Display */}
-        {tokenUsage && !isStreaming && (
-          <div className="text-[10px] text-muted-foreground/60 mt-1">
-            {tokenUsage.totalTokens.toLocaleString()} tokens ({tokenUsage.promptTokens.toLocaleString()} in, {tokenUsage.completionTokens.toLocaleString()} out)
-          </div>
-        )}
       </div>
     </TextSelectionHandler>
   );

@@ -151,6 +151,16 @@ export default defineSchema({
           role: v.union(v.literal("user"), v.literal("assistant")),
           content: v.string(),
           timestamp: v.number(),
+          attachments: v.optional(
+            v.array(
+              v.object({
+                storageId: v.string(),
+                fileName: v.string(),
+                fileType: v.string(),
+                fileSize: v.number(),
+              })
+            )
+          ),
           tokenUsage: v.optional(
             v.object({
               promptTokens: v.number(),

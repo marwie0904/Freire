@@ -23,7 +23,8 @@ import { CanvasConnections } from "@/components/canvas/canvas-connections";
 import { TokenProgressCircle } from "@/components/token-progress-circle";
 import { OptimizedCanvasCard } from "@/components/canvas/optimized-canvas-card";
 import { CanvasSkeleton } from "@/components/canvas/canvas-skeleton";
-import { calculateBranchPoints, drawStraightPath, calculateViewportBounds, isCardInViewport } from "@/lib/canvas-utils";
+import { calculateViewportBounds, isCardInViewport } from "@/lib/canvas-utils";
+import { ChatBox } from "@/components/ui/chat-box";
 import { useFileValidation } from "@/hooks/use-file-validation";
 import { uploadFilesToConvex, FileAttachment } from "@/lib/upload-files";
 import { FileAttachmentCard } from "@/components/file-attachment-card";
@@ -36,6 +37,23 @@ interface LocalCard {
   width: number;
   height: number;
   content: string;
+  branchNumber?: number;
+  conversationHistory?: Array<{
+    role: "user" | "assistant";
+    content: string;
+    timestamp: number;
+    attachments?: Array<{
+      storageId: string;
+      fileName: string;
+      fileType: string;
+      fileSize: number;
+    }>;
+    tokenUsage?: {
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+    };
+  }>;
 }
 
 export default function CanvasDetailPage() {
@@ -62,6 +80,8 @@ export default function CanvasDetailPage() {
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [useHighReasoning, setUseHighReasoning] = useState(false);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
 
   const [selectedCardId, setSelectedCardId] = useState<Id<"canvasCards"> | null>(null);
   const [editingCardId, setEditingCardId] = useState<Id<"canvasCards"> | null>(null);
@@ -131,10 +151,6 @@ export default function CanvasDetailPage() {
   const [isSaving, setIsSaving] = useState(false);
   const savingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Branching state
-  const [branchingFrom, setBranchingFrom] = useState<{ cardId: Id<"canvasCards">; side: string } | null>(null);
-  const [branchDragStart, setBranchDragStart] = useState<{ x: number; y: number } | null>(null);
-  const [branchDragCurrent, setBranchDragCurrent] = useState<{ x: number; y: number } | null>(null);
   const [hoveredCard, setHoveredCard] = useState<Id<"canvasCards"> | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
@@ -260,6 +276,25 @@ export default function CanvasDetailPage() {
   }, [canvasOffset, canvasZoom, CANVAS_CENTER_X, CANVAS_CENTER_Y]);
 
   // Sync Convex data to local state - ONLY on initial load
+  // Calculate branch numbers based on connections
+  const calculateBranchNumbers = useCallback((cards: any[], connections: any[] | undefined) => {
+    if (!connections) return cards;
+
+    // Create a map of target card IDs to their incoming connections
+    const incomingConnections = new Map<Id<"canvasCards">, number>();
+
+    connections.forEach(conn => {
+      const currentCount = incomingConnections.get(conn.targetCardId) || 0;
+      incomingConnections.set(conn.targetCardId, currentCount + 1);
+    });
+
+    // Assign branch numbers to cards
+    return cards.map(card => ({
+      ...card,
+      branchNumber: incomingConnections.get(card._id),
+    }));
+  }, []);
+
   useEffect(() => {
     // Only sync once on initial load, then manual save controls everything
     if (hasInitiallyLoaded) {
@@ -269,18 +304,23 @@ export default function CanvasDetailPage() {
     if (canvasCards && canvasCards.length > 0) {
       // Use transition for initial card loading (non-urgent)
       startTransition(() => {
-        setLocalCards(canvasCards.map(card => ({
-          _id: card._id,
-          x: card.x,
-          y: card.y,
-          width: card.width,
-          height: card.height,
-          content: card.content,
-        })));
+        const cardsWithBranchNumbers = calculateBranchNumbers(
+          canvasCards.map(card => ({
+            _id: card._id,
+            x: card.x,
+            y: card.y,
+            width: card.width,
+            height: card.height,
+            content: card.content,
+            conversationHistory: card.conversationHistory,
+          })),
+          connections
+        );
+        setLocalCards(cardsWithBranchNumbers);
         setHasInitiallyLoaded(true);
       });
     }
-  }, [canvasCards, hasInitiallyLoaded]);
+  }, [canvasCards, hasInitiallyLoaded, connections, calculateBranchNumbers]);
 
   // Log chatbox visibility changes
   useEffect(() => {
@@ -411,15 +451,14 @@ export default function CanvasDetailPage() {
       latestDragPosition.current = { x: clampedX, y: clampedY };
       dragOffsetRef.current = { x: offsetX, y: offsetY };
 
-      // Apply transform directly to DOM element (NO React re-render!)
-      // This is GPU-accelerated and bypasses React entirely
+      // Use requestAnimationFrame for smooth 60fps updates
       if (rafIdRef.current === null) {
         rafIdRef.current = requestAnimationFrame(() => {
-          if (draggedCardElementRef.current) {
-            // Apply additional translate on top of base position
-            draggedCardElementRef.current.style.transform =
-              `translate3d(${cardDragStart.cardX + offsetX}px, ${cardDragStart.cardY + offsetY}px, 0)`;
-          }
+          // Update local state so connections follow the card
+          setLocalCards(prev => prev.map(c =>
+            c._id === draggedCard ? { ...c, x: clampedX, y: clampedY } : c
+          ));
+
           rafIdRef.current = null;
         });
       }
@@ -434,11 +473,6 @@ export default function CanvasDetailPage() {
 
     // CRITICAL: Use ref to get the latest position (not stale state)
     const latestPosition = latestDragPosition.current;
-
-    // Reset CSS transform before updating state
-    if (draggedCardElementRef.current && wasDragging) {
-      draggedCardElementRef.current.style.transform = '';
-    }
 
     // Always reset drag state, even if no position
     isDraggingRef.current = false;
@@ -559,8 +593,8 @@ export default function CanvasDetailPage() {
       const cardWidth = 400;
       const cardHeight = 300;
 
-      const canvasX = (relativeX - canvasOffset.x) / canvasZoom;
-      const canvasY = (relativeY - canvasOffset.y) / canvasZoom;
+      const canvasX = (relativeX - (canvasOffset?.x || 0)) / canvasZoom;
+      const canvasY = (relativeY - (canvasOffset?.y || 0)) / canvasZoom;
 
       // Center card on cursor
       let x = canvasX - (cardWidth / 2);
@@ -732,24 +766,43 @@ export default function CanvasDetailPage() {
         setIsProcessingFiles(false);
       }
 
-      // Add user message
-      await addCardMessage({
+      // Add user message and get the updated conversation history
+      const conversationHistory = await addCardMessage({
         id: currentCardId,
         role: "user",
         content: userMessage,
         attachments: fileAttachments,
       });
 
-      // Call AI API with streaming
-      const response = await fetch("/api/canvas-chat", {
+      if (!conversationHistory || conversationHistory.length === 0) {
+        throw new Error("No messages in conversation history");
+      }
+
+      // Build messages array for chat-v2 endpoint (just role and content, no attachments)
+      const messages = conversationHistory.map((msg: any) => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      // Extract attachments from the last message (if it's the user message we just added)
+      const lastMessage = conversationHistory[conversationHistory.length - 1];
+      const messageAttachments = lastMessage?.role === 'user' ? lastMessage.attachments : undefined;
+
+      console.log('📤 [Canvas] Sending messages to chat-v2:', {
+        messageCount: messages.length,
+        lastMessage: messages[messages.length - 1],
+        attachments: messageAttachments,
+      });
+
+      // Call the SAME chat-v2 endpoint as normal conversation
+      const response = await fetch("/api/chat-v2", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: userMessage,
-          cardId: currentCardId,
-          canvasId: canvasId,
+          messages,
           model: selectedModel.value,
-          attachments: fileAttachments,
+          useHighReasoning,
+          attachments: messageAttachments,
         }),
       });
 
@@ -886,6 +939,58 @@ export default function CanvasDetailPage() {
     // Placeholder for sources functionality
   };
 
+  const handleBranchCard = async (cardId: Id<"canvasCards">) => {
+    const sourceCard = localCards.find(c => c._id === cardId);
+    if (!sourceCard) return;
+
+    try {
+      // Create new card to the right of source card with some spacing
+      const cardWidth = 400;
+      const cardHeight = 300;
+      const spacing = 150;
+      const newCardX = sourceCard.x + sourceCard.width + spacing;
+      const newCardY = sourceCard.y;
+
+      // Generate temporary ID for instant local rendering
+      const tempId = `temp-${Date.now()}` as Id<"canvasCards">;
+
+      // Calculate branch number for new card (it will have 1 incoming connection)
+      const branchNumber = 1;
+
+      // INSTANTLY add to local state first (snappy UI) - copy content from source
+      setLocalCards(prev => [...prev, {
+        _id: tempId,
+        x: newCardX,
+        y: newCardY,
+        width: cardWidth,
+        height: cardHeight,
+        content: sourceCard.content, // Copy content from source card
+        branchNumber,
+      }]);
+
+      // Create in database in background
+      const newCardId = await branchCard({
+        sourceCardId: cardId,
+        x: newCardX,
+        y: newCardY,
+      });
+
+      // Replace temp ID with real ID in local cards
+      setLocalCards(prev => prev.map(card =>
+        card._id === tempId ? { ...card, _id: newCardId } : card
+      ));
+
+      // Create connection between cards
+      await createConnection({
+        canvasId,
+        sourceCardId: cardId,
+        targetCardId: newCardId,
+      });
+    } catch (error) {
+      console.error('Branch creation error:', error);
+    }
+  };
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -903,6 +1008,36 @@ export default function CanvasDetailPage() {
 
   const removeFile = (index: number) => {
     setAttachedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Drag and drop handlers for file attachments
+  const handleFileDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingOver(true);
+  };
+
+  const handleFileDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.currentTarget === e.target) {
+      setIsDraggingOver(false);
+    }
+  };
+
+  const handleFileDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleFileDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+
+    const validFiles = validateFiles(files);
+    if (validFiles.length > 0) {
+      setAttachedFiles(prev => [...prev, ...validFiles]);
+    }
   };
 
   // Canvas pan handlers
@@ -923,8 +1058,8 @@ export default function CanvasDetailPage() {
       const canvasHeight = 10000;
 
       // Mouse position relative to canvas (accounting for zoom and pan)
-      const canvasX = (e.clientX - canvasOffset.x) / canvasZoom;
-      const canvasY = (e.clientY - canvasOffset.y) / canvasZoom;
+      const canvasX = (e.clientX - (canvasOffset?.x || 0)) / canvasZoom;
+      const canvasY = (e.clientY - (canvasOffset?.y || 0)) / canvasZoom;
 
       // Determine horizontal region (left, mid, right)
       let horizontalRegion = '';
@@ -960,7 +1095,7 @@ export default function CanvasDetailPage() {
       e.preventDefault();
       e.stopPropagation();
       setIsPanning(true);
-      setPanStart({ x: e.clientX - canvasOffset.x, y: e.clientY - canvasOffset.y });
+      setPanStart({ x: e.clientX - (canvasOffset?.x || 0), y: e.clientY - (canvasOffset?.y || 0) });
     }
   };
 
@@ -1046,12 +1181,12 @@ export default function CanvasDetailPage() {
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
 
-      const delta = -e.deltaY * 0.01;
+      const delta = -e.deltaY * 0.003;
       const newZoom = Math.min(Math.max(0.1, canvasZoom + delta), 3);
 
       // Find what point in canvas space is currently under the mouse cursor
-      const canvasPointX = (mouseX - canvasOffset.x) / canvasZoom;
-      const canvasPointY = (mouseY - canvasOffset.y) / canvasZoom;
+      const canvasPointX = (mouseX - (canvasOffset?.x || 0)) / canvasZoom;
+      const canvasPointY = (mouseY - (canvasOffset?.y || 0)) / canvasZoom;
 
       // After zoom, keep that same canvas point under the mouse cursor
       const newOffsetX = mouseX - (canvasPointX * newZoom);
@@ -1074,12 +1209,12 @@ export default function CanvasDetailPage() {
     const viewportCenterX = rect.width / 2;
     const viewportCenterY = rect.height / 2;
 
-    const newZoom = Math.min(canvasZoom + 0.1, 3);
+    const newZoom = Math.min(canvasZoom + 0.05, 3);
 
     // Find what canvas point is currently at CENTER VIEW
     // Canvas point = (screen point - offset) / zoom
-    const canvasPointX = (viewportCenterX - canvasOffset.x) / canvasZoom;
-    const canvasPointY = (viewportCenterY - canvasOffset.y) / canvasZoom;
+    const canvasPointX = (viewportCenterX - (canvasOffset?.x || 0)) / canvasZoom;
+    const canvasPointY = (viewportCenterY - (canvasOffset?.y || 0)) / canvasZoom;
 
     // After zoom, keep that canvas point at CENTER VIEW
     // offset = screen point - (canvas point * new zoom)
@@ -1102,12 +1237,12 @@ export default function CanvasDetailPage() {
     const viewportCenterX = rect.width / 2;
     const viewportCenterY = rect.height / 2;
 
-    const newZoom = Math.max(canvasZoom - 0.1, 0.1);
+    const newZoom = Math.max(canvasZoom - 0.05, 0.1);
 
     // Find what canvas point is currently at CENTER VIEW
     // Canvas point = (screen point - offset) / zoom
-    const canvasPointX = (viewportCenterX - canvasOffset.x) / canvasZoom;
-    const canvasPointY = (viewportCenterY - canvasOffset.y) / canvasZoom;
+    const canvasPointX = (viewportCenterX - (canvasOffset?.x || 0)) / canvasZoom;
+    const canvasPointY = (viewportCenterY - (canvasOffset?.y || 0)) / canvasZoom;
 
     // After zoom, keep that canvas point at CENTER VIEW
     // offset = screen point - (canvas point * new zoom)
@@ -1239,69 +1374,6 @@ export default function CanvasDetailPage() {
     }
   };
 
-  // Branch handlers
-  const handleBranchStart = (e: React.MouseEvent, cardId: Id<"canvasCards">, side: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const card = localCards.find(c => c._id === cardId);
-    if (!card) return;
-
-    const branchPoints = calculateBranchPoints(card);
-    const branchPoint = branchPoints.find(p => p.side === side);
-    if (!branchPoint) return;
-
-    setBranchingFrom({ cardId, side });
-    setBranchDragStart({ x: branchPoint.x, y: branchPoint.y });
-    setBranchDragCurrent({ x: e.clientX, y: e.clientY });
-  };
-
-  const handleBranchMove = (e: MouseEvent) => {
-    if (!branchingFrom || !branchDragStart) return;
-
-    // Convert screen coordinates to canvas coordinates
-    const canvasX = (e.clientX - canvasOffset.x) / canvasZoom;
-    const canvasY = (e.clientY - canvasOffset.y) / canvasZoom;
-
-    setBranchDragCurrent({ x: canvasX, y: canvasY });
-  };
-
-  const handleBranchEnd = async () => {
-    if (!branchingFrom || !branchDragCurrent) {
-      setBranchingFrom(null);
-      setBranchDragStart(null);
-      setBranchDragCurrent(null);
-      return;
-    }
-
-    const sourceCard = localCards.find(c => c._id === branchingFrom.cardId);
-    if (!sourceCard) return;
-
-    try {
-      // Create new card at release position (centered on cursor)
-      const newCardX = branchDragCurrent.x - sourceCard.width / 2;
-      const newCardY = branchDragCurrent.y - sourceCard.height / 2;
-
-      const newCardId = await branchCard({
-        sourceCardId: branchingFrom.cardId,
-        x: newCardX,
-        y: newCardY,
-      });
-
-      // Create connection between cards
-      await createConnection({
-        canvasId,
-        sourceCardId: branchingFrom.cardId,
-        targetCardId: newCardId,
-      });
-    } catch (error) {
-      // Failed to create branch
-    } finally {
-      setBranchingFrom(null);
-      setBranchDragStart(null);
-      setBranchDragCurrent(null);
-    }
-  };
 
   useEffect(() => {
     // Use passive event listeners for better scroll/drag performance
@@ -1331,14 +1403,6 @@ export default function CanvasDetailPage() {
       window.removeEventListener('mouseup', handleCardMouseUp);
     }
 
-    if (branchingFrom) {
-      window.addEventListener('mousemove', handleBranchMove, passiveOptions as any);
-      window.addEventListener('mouseup', handleBranchEnd);
-    } else {
-      window.removeEventListener('mousemove', handleBranchMove);
-      window.removeEventListener('mouseup', handleBranchEnd);
-    }
-
     return () => {
       window.removeEventListener('mousemove', handleResizeMove);
       window.removeEventListener('mouseup', handleResizeEnd);
@@ -1346,10 +1410,8 @@ export default function CanvasDetailPage() {
       window.removeEventListener('mouseup', handleCanvasPanEnd);
       window.removeEventListener('mousemove', handleCardMouseMove);
       window.removeEventListener('mouseup', handleCardMouseUp);
-      window.removeEventListener('mousemove', handleBranchMove);
-      window.removeEventListener('mouseup', handleBranchEnd);
     };
-  }, [resizingCard, isPanning, draggedCard, branchingFrom]);
+  }, [resizingCard, isPanning, draggedCard]);
 
   // Store card content locally per card - only synced on manual save
   const cardContentMapRef = useRef<Map<string, string>>(new Map());
@@ -1485,7 +1547,7 @@ export default function CanvasDetailPage() {
               }
             }}
             style={{
-              transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px) scale(${canvasZoom})`,
+              transform: `translate(${(canvasOffset?.x || 0)}px, ${(canvasOffset?.y || 0)}px) scale(${canvasZoom})`,
               transformOrigin: '0 0',
               width: `${CANVAS_WIDTH}px`,
               height: `${CANVAS_HEIGHT}px`,
@@ -1510,7 +1572,6 @@ export default function CanvasDetailPage() {
               onMouseLeave={handleCardMouseLeave}
               onContentChange={handleContentChange}
               onEscapePress={handleEscapePress}
-              onBranchStart={handleBranchStart}
               onResizeStart={handleResizeStart}
               cardTextareaRef={handleCardTextareaRef}
               conversationContext={card.conversationHistory || []}
@@ -1526,6 +1587,7 @@ export default function CanvasDetailPage() {
               modelOptions={MODEL_OPTIONS}
               onDeleteCard={handleDeleteCard}
               onCopyContent={handleCopyContent}
+              onBranchCard={handleBranchCard}
               onSources={handleSources}
               chatInputRef={chatInputRef}
               onEditingChange={(cardId) => setEditingCardId(cardId)}
@@ -1545,43 +1607,6 @@ export default function CanvasDetailPage() {
               zoom={canvasZoom}
               offset={canvasOffset}
             />
-          )}
-
-          {/* Temporary branch drag line */}
-          {branchingFrom && branchDragStart && branchDragCurrent && (
-            <svg
-              className="absolute inset-0 pointer-events-none"
-              style={{
-                width: '100%',
-                height: '100%',
-                zIndex: 15,
-              }}
-            >
-              <g
-                style={{
-                  transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px) scale(${canvasZoom})`,
-                  transformOrigin: '0 0',
-                }}
-              >
-                <path
-                  d={drawStraightPath(branchDragStart, branchDragCurrent)}
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  fill="none"
-                  strokeDasharray="5,5"
-                  className="text-primary"
-                />
-                {/* Cursor circle */}
-                <circle
-                  cx={branchDragCurrent.x}
-                  cy={branchDragCurrent.y}
-                  r={8}
-                  fill="currentColor"
-                  className="text-primary"
-                  opacity={0.5}
-                />
-              </g>
-            </svg>
           )}
 
           </div>
@@ -1644,6 +1669,40 @@ export default function CanvasDetailPage() {
             </Button>
           </div>
         </div>
+
+        {/* Fixed Chatbox at Bottom - appears when a card is selected */}
+        {selectedCardId && (
+          <div className="absolute bottom-0 left-0 right-0 flex justify-center px-8 pb-6 pointer-events-none z-50">
+            <div className="pointer-events-auto w-full max-w-2xl">
+              <ChatBox
+                value={chatInput}
+                onChange={setChatInput}
+                onSubmit={handleSendMessage}
+                selectedModel={selectedModel}
+                onModelChange={setSelectedModel}
+                modelOptions={MODEL_OPTIONS}
+                attachedFiles={attachedFiles}
+                onFileSelect={handleFileSelect}
+                onRemoveFile={removeFile}
+                isProcessingFiles={isProcessingFiles}
+                fileInputRef={fileInputRef}
+                tokenCount={cardTokenUsage}
+                useHighReasoning={useHighReasoning}
+                onHighReasoningChange={setUseHighReasoning}
+                onCreateTest={undefined}
+                canCreateTest={false}
+                fileTypeError={fileTypeError}
+                onDragEnter={handleFileDragEnter}
+                onDragLeave={handleFileDragLeave}
+                onDragOver={handleFileDragOver}
+                onDrop={handleFileDrop}
+                isDraggingOver={isDraggingOver}
+                isLoading={isSendingMessage}
+                textareaRef={chatInputRef}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
     </TooltipProvider>

@@ -5,11 +5,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { CanvasCardContent } from "./canvas-card-content";
 import { CanvasTextSelectionHandler } from "./canvas-text-selection-handler";
-import { calculateBranchPoints } from "@/lib/canvas-utils";
 import { Id } from "../../../convex/_generated/dataModel";
-import { Plus, Minus, ArrowUp, ExternalLink, Trash2, Copy, Timer, ListChecks, ChevronDown } from "lucide-react";
-import { TokenProgressCircle } from "@/components/token-progress-circle";
-import { FileAttachmentCard } from "@/components/file-attachment-card";
+import { Plus, Minus, ExternalLink, Trash2, Copy, GitBranch } from "lucide-react";
+import { ChatBox } from "@/components/ui/chat-box";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +22,7 @@ interface LocalCard {
   width: number;
   height: number;
   content: string;
+  branchNumber?: number;
 }
 
 interface OptimizedCanvasCardProps {
@@ -39,7 +38,6 @@ interface OptimizedCanvasCardProps {
   onMouseLeave: () => void;
   onContentChange: (cardId: Id<"canvasCards">, content: string) => void;
   onEscapePress: () => void;
-  onBranchStart: (e: React.MouseEvent, cardId: Id<"canvasCards">, side: string) => void;
   onResizeStart: (e: React.MouseEvent, cardId: Id<"canvasCards">) => void;
   cardTextareaRef: (el: HTMLTextAreaElement | null, cardId: Id<"canvasCards">) => void;
   conversationContext?: any[];
@@ -56,15 +54,135 @@ interface OptimizedCanvasCardProps {
   modelOptions?: Array<{ label: string; value: string }>;
   onDeleteCard?: (cardId: Id<"canvasCards">) => void;
   onCopyContent?: () => void;
+  onBranchCard?: (cardId: Id<"canvasCards">) => void;
   onSources?: () => void;
-  chatInputRef?: React.RefObject<HTMLTextAreaElement>;
+  chatInputRef?: React.RefObject<HTMLTextAreaElement | null>;
   onEditingChange?: (cardId: Id<"canvasCards">) => void;
   // File attachment props
   attachedFiles?: File[];
   onFileSelect?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemoveFile?: (index: number) => void;
-  fileInputRef?: React.RefObject<HTMLInputElement>;
+  fileInputRef?: React.RefObject<HTMLInputElement | null>;
   isProcessingFiles?: boolean;
+}
+
+// Separate chatbox component that doesn't get memoized
+function CanvasChatBox({
+  card,
+  selectedCardId,
+  chatInput,
+  onChatInputChange,
+  onSendMessage,
+  isSendingMessage,
+  selectedModel,
+  onModelChange,
+  modelOptions,
+  attachedFiles,
+  onFileSelect,
+  onRemoveFile,
+  isProcessingFiles,
+  fileInputRef,
+  cardTokenUsage,
+  chatInputRef,
+  onSources,
+  onDeleteCard,
+  onCopyContent,
+}: any) {
+  const [isChatboxFocused, setIsChatboxFocused] = useState(false);
+  const [isChatboxHovered, setIsChatboxHovered] = useState(false);
+
+  const isSelected = selectedCardId === card._id;
+
+  if (!isSelected || !onSendMessage || !onChatInputChange || chatInput === undefined) {
+    return null;
+  }
+
+  return (
+    <div
+      data-chatbox
+      className="fixed bottom-0 left-0 right-0 flex justify-center px-8 pb-6 pointer-events-none"
+      style={{
+        zIndex: 1000,
+      }}
+    >
+      <div
+        className="pointer-events-auto w-full max-w-2xl transition-opacity"
+        onMouseEnter={() => setIsChatboxHovered(true)}
+        onMouseLeave={() => setIsChatboxHovered(false)}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          opacity: (isChatboxFocused || isChatboxHovered) ? 1 : 0.5,
+        }}
+      >
+      <ChatBox
+        value={chatInput || ""}
+        onChange={(value) => onChatInputChange?.(value)}
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSendMessage?.(e);
+        }}
+        selectedModel={selectedModel || { label: "FREIRE LITE", value: "openai/gpt-oss-20b" }}
+        onModelChange={(model) => onModelChange?.(model)}
+        modelOptions={modelOptions || []}
+        attachedFiles={attachedFiles}
+        onFileSelect={onFileSelect}
+        onRemoveFile={onRemoveFile}
+        isProcessingFiles={isProcessingFiles}
+        fileInputRef={fileInputRef}
+        tokenCount={cardTokenUsage ? {
+          totalOutputTokens: cardTokenUsage.totalOutputTokens,
+          limit: cardTokenUsage.limit,
+          isLimitReached: cardTokenUsage.totalOutputTokens >= cardTokenUsage.limit
+        } : undefined}
+        isLoading={isSendingMessage}
+        textareaRef={chatInputRef}
+      />
+
+      {/* Additional Action Buttons Below */}
+      <div className="flex items-center justify-between mt-2 px-2">
+        {/* Left: Sources */}
+        {onSources && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onSources}
+            className="text-xs gap-1 h-7"
+          >
+            <ExternalLink className="h-3 w-3" />
+            Sources
+          </Button>
+        )}
+
+        {/* Right: Delete, Copy */}
+        <div className="flex items-center gap-1">
+          {onDeleteCard && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onDeleteCard(card._id)}
+              className="h-7 w-7"
+              title="Delete card"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          {onCopyContent && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onCopyContent}
+              className="h-7 w-7"
+              title="Copy content"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
+      </div>
+      </div>
+    </div>
+  );
 }
 
 // Non-memoized wrapper that handles zoom state
@@ -73,12 +191,12 @@ function CardWithZoom(props: OptimizedCanvasCardProps) {
 
   const handleZoomIn = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    setZoomLevel(prev => Math.min(prev + 10, 200));
+    setZoomLevel(prev => Math.min(prev + 5, 200));
   }, []);
 
   const handleZoomOut = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    setZoomLevel(prev => Math.max(prev - 10, 50));
+    setZoomLevel(prev => Math.max(prev - 5, 50));
   }, []);
 
   return <OptimizedCanvasCardInner {...props} zoomLevel={zoomLevel} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} />;
@@ -103,7 +221,6 @@ const OptimizedCanvasCardInner = memo(function OptimizedCanvasCardInner({
   onMouseLeave,
   onContentChange,
   onEscapePress,
-  onBranchStart,
   onResizeStart,
   cardTextareaRef,
   zoomLevel,
@@ -122,6 +239,7 @@ const OptimizedCanvasCardInner = memo(function OptimizedCanvasCardInner({
   modelOptions,
   onDeleteCard,
   onCopyContent,
+  onBranchCard,
   onSources,
   chatInputRef,
   onEditingChange,
@@ -132,14 +250,10 @@ const OptimizedCanvasCardInner = memo(function OptimizedCanvasCardInner({
   isProcessingFiles,
 }: OptimizedCanvasCardInnerProps) {
 
-  const branchPoints = calculateBranchPoints(card);
   const isHovered = hoveredCard === card._id;
   const isSelected = selectedCardId === card._id;
   const isEditing = editingCardId === card._id;
   const isDragging = draggedCard === card._id;
-
-  const [isChatboxFocused, setIsChatboxFocused] = useState(false);
-  const [isChatboxHovered, setIsChatboxHovered] = useState(false);
 
   // Local state for textarea to avoid parent re-renders during typing
   const [localContent, setLocalContent] = useState(card.content);
@@ -189,33 +303,6 @@ const OptimizedCanvasCardInner = memo(function OptimizedCanvasCardInner({
 
   return (
     <>
-      {/* Zoom Controls - positioned above card at top-right */}
-      {(isHovered || isSelected) && (
-        <div
-          className="absolute flex gap-1 z-30"
-          style={{
-            transform: `translate3d(${card.x + card.width - 60}px, ${card.y - 32}px, 0)`,
-          }}
-        >
-          <button
-            onClick={onZoomOut}
-            onMouseDown={(e) => e.stopPropagation()}
-            className="w-6 h-6 rounded bg-card border border-border hover:bg-accent flex items-center justify-center shadow-md transition-colors"
-            title="Zoom out (10%)"
-          >
-            <Minus className="w-4 h-4" />
-          </button>
-          <button
-            onClick={onZoomIn}
-            onMouseDown={(e) => e.stopPropagation()}
-            className="w-6 h-6 rounded bg-card border border-border hover:bg-accent flex items-center justify-center shadow-md transition-colors"
-            title="Zoom in (10%)"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
       {/* Container for card and chatbox - moves together */}
       <div
         className="absolute"
@@ -226,6 +313,47 @@ const OptimizedCanvasCardInner = memo(function OptimizedCanvasCardInner({
           zIndex: isOnTop ? 20 : 10,
         }}
       >
+        {/* Zoom Controls - positioned above card at top-right */}
+        {(isHovered || isSelected) && (
+          <div
+            className="absolute flex gap-1 z-30"
+            style={{
+              right: '0px',
+              top: '-32px',
+            }}
+          >
+            <button
+              onClick={onZoomOut}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="w-6 h-6 rounded bg-card border border-border hover:bg-accent flex items-center justify-center shadow-md transition-colors"
+              title="Zoom out (5%)"
+            >
+              <Minus className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onZoomIn}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="w-6 h-6 rounded bg-card border border-border hover:bg-accent flex items-center justify-center shadow-md transition-colors"
+              title="Zoom in (5%)"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Branch Number Label - positioned outside card at top-left */}
+        {card.branchNumber && (
+          <div
+            className="absolute text-xs font-medium text-muted-foreground pointer-events-none z-30"
+            style={{
+              left: '0px',
+              top: '-24px',
+            }}
+          >
+            Branch #{card.branchNumber}
+          </div>
+        )}
+
         {/* Card */}
         <div
         key={card._id}
@@ -247,6 +375,7 @@ const OptimizedCanvasCardInner = memo(function OptimizedCanvasCardInner({
           contentVisibility: 'auto',
         }}
       >
+
         <div
           style={{
             transform: `scale(${zoomLevel / 100})`,
@@ -324,22 +453,6 @@ const OptimizedCanvasCardInner = memo(function OptimizedCanvasCardInner({
           )}
         </div>
 
-        {/* Branch Dots - visible on hover */}
-        {isHovered && branchPoints.map((point) => (
-          <div
-            key={point.side}
-            onMouseDown={(e) => onBranchStart(e, card._id, point.side)}
-            className="absolute w-3 h-3 rounded-full bg-primary cursor-pointer hover:scale-150 transition-transform z-20"
-            style={{
-              left: point.side === 'right' ? '100%' : point.side === 'left' ? '-6px' : `calc(50% - 6px)`,
-              top: point.side === 'bottom' ? '100%' : point.side === 'top' ? '-6px' : `calc(50% - 6px)`,
-              transform: point.side === 'right' ? 'translateX(-6px)' :
-                        point.side === 'bottom' ? 'translateY(-6px)' : 'none',
-            }}
-            title={`Branch from ${point.side}`}
-          />
-        ))}
-
         {/* Resize Handle */}
         <div
           data-resize-handle
@@ -351,216 +464,57 @@ const OptimizedCanvasCardInner = memo(function OptimizedCanvasCardInner({
         />
       </div>
 
-      {/* Chatbox - positioned below the card */}
-      {isSelected && onSendMessage && onChatInputChange && chatInput !== undefined && (
+      {/* Action Buttons - positioned outside card at bottom-right */}
+      {(isHovered || isSelected) && (
         <div
-          data-chatbox
-          className="absolute transition-opacity"
-          onMouseEnter={() => setIsChatboxHovered(true)}
-          onMouseLeave={() => setIsChatboxHovered(false)}
+          className="absolute flex gap-1 z-30"
           style={{
-            left: `${(card.width / 2) - 250}px`,
-            top: `${card.height + 16}px`,
-            width: '500px',
-            zIndex: 1000,
-            opacity: (isChatboxFocused || isChatboxHovered) ? 1 : 0.5,
-          }}
-          onClick={(e) => {
-            e.stopPropagation();
-            // Clicking chatbox enters edit mode
-            if (editingCardId !== card._id && onEditingChange) {
-              onEditingChange(card._id);
-              // Focus the chat input
-              setTimeout(() => {
-                chatInputRef?.current?.focus({ preventScroll: true });
-              }, 50);
-            }
+            right: '0px',
+            bottom: '-40px',
           }}
         >
-          {/* Hidden file input */}
-          {fileInputRef && onFileSelect && (
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.mp3,.wav,.m4a,.webm,.doc,.docx,.txt"
-              onChange={onFileSelect}
-              className="hidden"
-            />
+          {onCopyContent && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onCopyContent();
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="w-7 h-7 rounded bg-card border border-border hover:bg-accent flex items-center justify-center shadow-md transition-colors"
+              title="Copy content"
+            >
+              <Copy className="w-3.5 h-3.5" />
+            </button>
           )}
-
-          <form onSubmit={onSendMessage} className="flex flex-col">
-            {/* File Attachments Display */}
-            {attachedFiles && attachedFiles.length > 0 && onRemoveFile && (
-              <div className="mb-2 px-2">
-                <div className="flex flex-wrap gap-2 p-2 rounded-lg bg-card/50 border border-border/40">
-                  {attachedFiles.map((file, index) => (
-                    <FileAttachmentCard
-                      key={`${file.name}-${index}`}
-                      file={file}
-                      onRemove={() => onRemoveFile(index)}
-                    />
-                  ))}
-                  {isProcessingFiles && (
-                    <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-                      <div className="animate-spin h-3 w-3 border-2 border-primary border-t-transparent rounded-full" />
-                      Uploading files...
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Main Input Container */}
-            <div className="relative flex flex-col-reverse rounded-2xl shadow-lg bg-chat-input">
-              {/* Toolbar */}
-              <div className="flex items-center justify-between px-3 py-2">
-                <div className="flex items-center gap-1.5">
-                  {/* Plus Button - File Attachment */}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => fileInputRef?.current?.click()}
-                    disabled={isProcessingFiles}
-                    className="h-8 w-8 rounded-md border border-border/40 hover:border-border hover:bg-accent/5"
-                    title="Attach files"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                  {/* Timer Button */}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-md border border-border/40 hover:border-border hover:bg-accent/5"
-                    title="High Reasoning"
-                  >
-                    <Timer className="h-4 w-4" />
-                  </Button>
-                  {/* List Button */}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-md border border-border/40 hover:border-border hover:bg-accent/5"
-                    title="Create Test"
-                  >
-                    <ListChecks className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  {/* Token Progress Circle */}
-                  {cardTokenUsage && (
-                    <TokenProgressCircle
-                      totalTokens={cardTokenUsage.totalOutputTokens}
-                      limit={cardTokenUsage.limit}
-                    />
-                  )}
-
-                  {/* Model Selector */}
-                  {selectedModel && onModelChange && modelOptions && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 gap-1 px-3 text-xs font-medium rounded-md border border-border/40 hover:border-border hover:bg-accent/5"
-                        >
-                          {selectedModel.label}
-                          <ChevronDown className="h-3 w-3 opacity-50" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {modelOptions.map((model, index) => (
-                          <DropdownMenuItem
-                            key={`${model.value}-${index}`}
-                            onClick={() => onModelChange(model)}
-                          >
-                            {model.label}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-
-                  {/* Submit Button */}
-                  <Button
-                    type="submit"
-                    size="icon"
-                    disabled={!chatInput.trim() || isSendingMessage}
-                    className="h-8 w-8 rounded-md bg-primary hover:bg-primary/90 disabled:opacity-50"
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              {/* Textarea */}
-              <Textarea
-                ref={chatInputRef}
-                placeholder="How can I help you today?"
-                value={chatInput}
-                onChange={(e) => onChatInputChange(e.target.value)}
-                onFocus={() => setIsChatboxFocused(true)}
-                onBlur={() => setIsChatboxFocused(false)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    onSendMessage(e);
-                  }
-                }}
-                disabled={isSendingMessage}
-                className="min-h-[24px] max-h-[200px] resize-none border-0 bg-transparent px-4 pt-3 pb-2 text-sm leading-relaxed focus-visible:ring-0 focus-visible:ring-offset-0 overflow-hidden placeholder:text-muted-foreground/50"
-              />
-            </div>
-          </form>
-
-          {/* Additional Action Buttons Below */}
-          <div className="flex items-center justify-between mt-2 px-2">
-            {/* Left: Sources */}
-            {onSources && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onSources}
-                className="text-xs gap-1 h-7"
-              >
-                <ExternalLink className="h-3 w-3" />
-                Sources
-              </Button>
-            )}
-
-            {/* Right: Delete, Copy */}
-            <div className="flex items-center gap-1">
-              {onDeleteCard && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => onDeleteCard(card._id)}
-                  className="h-7 w-7"
-                  title="Delete card"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              )}
-              {onCopyContent && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onCopyContent}
-                  className="h-7 w-7"
-                  title="Copy content"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
-          </div>
+          {onDeleteCard && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteCard(card._id);
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="w-7 h-7 rounded bg-card border border-border hover:bg-accent hover:text-destructive flex items-center justify-center shadow-md transition-colors"
+              title="Delete card"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {onBranchCard && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onBranchCard(card._id);
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="w-7 h-7 rounded bg-card border border-border hover:bg-accent flex items-center justify-center shadow-md transition-colors"
+              title="Branch card"
+            >
+              <GitBranch className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       )}
+
       </div>
     </>
   );
@@ -598,7 +552,8 @@ const OptimizedCanvasCardInner = memo(function OptimizedCanvasCardInner({
       prevProps.draggedCard === nextProps.draggedCard &&
       prevProps.hoveredCard === nextProps.hoveredCard &&
       prevProps.isOnTop === nextProps.isOnTop &&
-      prevProps.zoomLevel === nextProps.zoomLevel
+      prevProps.zoomLevel === nextProps.zoomLevel &&
+      prevProps.chatInput === nextProps.chatInput
     );
   }
 

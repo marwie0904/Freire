@@ -18,15 +18,8 @@ export const CanvasCardContent = memo(function CanvasCardContent({ content }: Ca
   const [skeletonCount, setSkeletonCount] = useState(10);
   const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  if (!content) {
-    return (
-      <div className="flex items-center justify-center h-full w-full text-center text-muted-foreground text-base">
-        Double Click to <span className="font-bold mx-1">Chat</span> or <span className="font-bold mx-1">Edit</span>
-      </div>
-    );
-  }
-
   // Calculate skeleton count based on container height - debounced for performance
+  // MUST be before any early returns to follow Rules of Hooks
   useEffect(() => {
     if (content !== "Generating response..." || !containerRef.current) return;
 
@@ -62,6 +55,15 @@ export const CanvasCardContent = memo(function CanvasCardContent({ content }: Ca
       }
     };
   }, [content]);
+
+  // Early returns AFTER all hooks
+  if (!content) {
+    return (
+      <div className="flex items-center justify-center h-full w-full text-center text-muted-foreground text-base">
+        Double Click to <span className="font-bold mx-1">Chat</span> or <span className="font-bold mx-1">Edit</span>
+      </div>
+    );
+  }
 
   // Show cube loader during generation
   if (content === "Generating response...") {

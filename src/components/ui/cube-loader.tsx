@@ -16,23 +16,23 @@ export function CubeLoader({
   const sizeConfig = {
     xs: {
       container: "w-7 h-7",
-      cube: "w-3.5 h-3.5",
-      depth: "7px",
+      cube: "w-2.5 h-2.5",
+      depth: "5px",
     },
     sm: {
       container: "w-8 h-8",
-      cube: "w-4 h-4",
-      depth: "8px",
+      cube: "w-3 h-3",
+      depth: "6px",
     },
     md: {
-      container: "w-12 h-12",
-      cube: "w-8 h-8",
-      depth: "16px",
+      container: "w-16 h-16",
+      cube: "w-6 h-6",
+      depth: "12px",
     },
     lg: {
-      container: "w-16 h-16",
-      cube: "w-10 h-10",
-      depth: "20px",
+      container: "w-24 h-24",
+      cube: "w-8 h-8",
+      depth: "16px",
     },
   };
 
@@ -54,14 +54,13 @@ export function CubeLoader({
   return (
     <div
       className={cn(
-        "relative flex items-center justify-center overflow-hidden flex-shrink-0",
+        "relative flex items-center justify-center flex-shrink-0",
         sizeConfig[size].container,
         className
       )}
       style={{
-        perspective: "400px",
-        isolation: "isolate",
-        contain: "layout style paint"
+        perspective: "1000px",
+        transformStyle: "preserve-3d",
       }}
     >
       <div
@@ -72,6 +71,7 @@ export function CubeLoader({
         )}
         style={{
           transformStyle: "preserve-3d",
+          transformOrigin: "center center",
           backfaceVisibility: "hidden",
           willChange: "transform"
         }}
@@ -86,6 +86,7 @@ export function CubeLoader({
             opacity: 1,
             backfaceVisibility: "hidden",
             WebkitBackfaceVisibility: "hidden",
+            zIndex: 6,
           }}
         />
 
@@ -99,6 +100,7 @@ export function CubeLoader({
             opacity: 0.4,
             backfaceVisibility: "hidden",
             WebkitBackfaceVisibility: "hidden",
+            zIndex: 1,
           }}
         />
 
@@ -112,6 +114,7 @@ export function CubeLoader({
             opacity: 0.7,
             backfaceVisibility: "hidden",
             WebkitBackfaceVisibility: "hidden",
+            zIndex: 5,
           }}
         />
 
@@ -125,6 +128,7 @@ export function CubeLoader({
             opacity: 0.6,
             backfaceVisibility: "hidden",
             WebkitBackfaceVisibility: "hidden",
+            zIndex: 2,
           }}
         />
 
@@ -138,6 +142,7 @@ export function CubeLoader({
             opacity: 0.85,
             backfaceVisibility: "hidden",
             WebkitBackfaceVisibility: "hidden",
+            zIndex: 4,
           }}
         />
 
@@ -151,6 +156,7 @@ export function CubeLoader({
             opacity: 0.5,
             backfaceVisibility: "hidden",
             WebkitBackfaceVisibility: "hidden",
+            zIndex: 3,
           }}
         />
       </div>

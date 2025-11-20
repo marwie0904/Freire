@@ -89,7 +89,7 @@ export const CanvasConnections = memo(function CanvasConnections({
       const path = drawArrowPath(
         { x: closestSourcePoint.x, y: closestSourcePoint.y },
         { x: closestTargetPoint.x, y: closestTargetPoint.y },
-        'curved',
+        'elbow',
         closestSourcePoint.side,
         closestTargetPoint.side
       );
@@ -152,6 +152,7 @@ export const CanvasConnections = memo(function CanvasConnections({
                 strokeWidth={isHovered ? 3 : 2}
                 fill="none"
                 markerEnd="url(#arrowhead)"
+                strokeDasharray="8 4"
                 className={isHovered ? 'text-primary' : 'text-muted-foreground'}
                 style={{
                   pointerEvents: 'stroke',

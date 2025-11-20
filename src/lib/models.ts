@@ -51,5 +51,5 @@ export const MODEL_OPTIONS: ModelOption[] = [
 ];
 
 // Default model if none is selected
-// Changed from GPT_OSS_20B to GPT_OSS_120B_FAST due to tool calling issues with 20B model
-export const DEFAULT_MODEL = ACTUAL_MODELS.GPT_OSS_120B_FAST;
+// Changed from GPT_OSS_20B to GPT_OSS_120B_GMI (FREIRE) - user preference
+export const DEFAULT_MODEL = ACTUAL_MODELS.GPT_OSS_120B_GMI;

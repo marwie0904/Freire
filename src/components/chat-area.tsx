@@ -27,6 +27,7 @@ import { TokenProgressCircle } from "./token-progress-circle";
 import { LoadingWithText } from "@/components/ui/loading-with-text";
 import { CubeLoader } from "@/components/ui/cube-loader";
 import { AnimatedTitle } from "@/components/ui/animated-title";
+import { ChatBox } from "@/components/ui/chat-box";
 import { useQuery, useMutation, useConvex } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
@@ -34,6 +35,14 @@ import { uploadFilesToConvex, FileAttachment } from "@/lib/upload-files";
 import { MODEL_OPTIONS } from "@/lib/models";
 import { toast } from "sonner";
 import { useFileValidation } from "@/hooks/use-file-validation";
+
+// Global map to track active streams across all conversation instances
+const activeStreams = new Map<string, {
+  assistantMessageId: string;
+  currentContent: string;
+  isLoading: boolean;
+  isStreaming: boolean;
+}>();
 
 interface ChatAreaProps {
   conversationId: Id<"conversations"> | null;
@@ -102,6 +111,35 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
 
+  // Track which conversation is currently streaming to prevent message leakage
+  const streamingConversationRef = useRef<Id<"conversations"> | null>(null);
+
+  // Reset or restore streaming state when conversation changes
+  useEffect(() => {
+    if (!conversationId) {
+      setIsLoading(false);
+      setIsStreaming(false);
+      streamingConversationRef.current = null;
+      return;
+    }
+
+    // Check if this conversation has an active stream
+    const activeStream = activeStreams.get(conversationId);
+
+    if (activeStream) {
+      // Restore streaming state
+      console.log(`🔄 [Stream] Restoring active stream for conversation ${conversationId}`);
+      setIsLoading(activeStream.isLoading);
+      setIsStreaming(activeStream.isStreaming);
+      streamingConversationRef.current = conversationId;
+    } else {
+      // Reset streaming state
+      setIsLoading(false);
+      setIsStreaming(false);
+      streamingConversationRef.current = null;
+    }
+  }, [conversationId]);
+
   // Notify parent when streaming state changes
   useEffect(() => {
     if (onStreamingChange) {
@@ -109,8 +147,42 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
     }
   }, [isLoading, isStreaming, onStreamingChange]);
 
+  // Monitor active streams and update UI when viewing a streaming conversation
+  useEffect(() => {
+    if (!conversationId || !isStreaming) return;
+
+    const interval = setInterval(() => {
+      const activeStream = activeStreams.get(conversationId);
+
+      if (activeStream && activeStream.currentContent) {
+        // Update the streaming message with the latest content
+        setMessages(prev => {
+          const lastMessage = prev[prev.length - 1];
+
+          // Only update if the last message is the streaming message
+          if (lastMessage && lastMessage.id === activeStream.assistantMessageId) {
+            return prev.map(m =>
+              m.id === activeStream.assistantMessageId
+                ? { ...m, content: activeStream.currentContent }
+                : m
+            );
+          }
+
+          return prev;
+        });
+      }
+    }, 100); // Check every 100ms
+
+    return () => clearInterval(interval);
+  }, [conversationId, isStreaming]);
+
   // Manual sendMessage function with stream reading
   const sendMessage = async (userMessage: { role: string; content: string }, options: any) => {
+    const targetConversationId = options.body.conversationId;
+
+    // Track which conversation we're streaming to
+    streamingConversationRef.current = targetConversationId;
+
     setIsLoading(true);
     setIsStreaming(false);
 
@@ -133,6 +205,14 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
       createdAt: new Date(),
     };
     setMessages(prev => [...prev, assistantMsg]);
+
+    // Register this stream in the global map
+    activeStreams.set(targetConversationId, {
+      assistantMessageId: assistantId,
+      currentContent: '',
+      isLoading: true,
+      isStreaming: false,
+    });
 
     try {
       // Fetch from /api/chat-v2
@@ -176,8 +256,19 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
             try {
               const text = JSON.parse(line.substring(2));
               fullText += text;
+
+              // Update global stream state
+              const streamState = activeStreams.get(targetConversationId);
+              if (streamState) {
+                streamState.currentContent = fullText;
+                streamState.isStreaming = true;
+                streamState.isLoading = false;
+              }
+
               // Mark as streaming once we receive first content chunk
-              if (!isStreaming) setIsStreaming(true);
+              if (!isStreaming && streamingConversationRef.current === targetConversationId) {
+                setIsStreaming(true);
+              }
             } catch (e) {
               console.warn('Failed to parse chunk:', line);
             }
@@ -201,38 +292,30 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
         // Update content with parsed text
         assistantMsg = { ...assistantMsg, content: fullText };
 
-        // Update message in real-time
-        setMessages(prev =>
-          prev.map(m => (m.id === assistantId ? assistantMsg : m))
-        );
-      }
-
-      console.log('✅ [Stream] Streaming complete, saving to Convex...');
-
-      // Save to Convex after streaming completes
-      if (conversationId && fullText && metadata) {
-        try {
-          await saveMessage({
-            conversationId: conversationId,
-            content: fullText,
-            role: 'assistant',
-            tokenUsage: {
-              promptTokens: metadata.usage.promptTokens,
-              completionTokens: metadata.usage.completionTokens,
-              totalTokens: metadata.usage.totalTokens,
-            },
-            searchMetadata: metadata.searchMetadata,
-          });
-          console.log('✅ [Stream] Saved to Convex successfully');
-        } catch (error) {
-          console.error('[Stream] Error saving to Convex:', error);
+        // Only update message UI if we're still on the same conversation
+        if (streamingConversationRef.current === targetConversationId) {
+          setMessages(prev =>
+            prev.map(m => (m.id === assistantId ? assistantMsg : m))
+          );
         }
       }
+
+      console.log('✅ [Stream] Streaming complete');
+
+      // NOTE: Message saving now happens on the backend (API route) instead of frontend
+      // This ensures the message is saved before title generation is triggered
+      console.log('ℹ️ [Stream] Message already saved by backend API route');
     } catch (error) {
       console.error('Streaming error:', error);
     } finally {
-      setIsLoading(false);
-      setIsStreaming(false);
+      // Clean up global stream state
+      activeStreams.delete(targetConversationId);
+
+      // Only clear streaming state if we're still on the same conversation
+      if (streamingConversationRef.current === targetConversationId) {
+        setIsLoading(false);
+        setIsStreaming(false);
+      }
     }
   };
 
@@ -252,28 +335,73 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
     localStorage.setItem('selectedModel', selectedModel.value);
   }, [selectedModel]);
 
-  // Load conversation history when conversationId changes (only when not streaming)
+  // Load conversation history when conversationId changes
   useEffect(() => {
-    // Don't update messages while streaming or loading to prevent flicker
-    if (isLoading || isStreaming) return;
-
-    if (convexMessages) {
-      const formattedMessages = convexMessages.map((msg) => ({
-        id: msg._id,
-        role: msg.role as "user" | "assistant" | "system",
-        content: msg.content,
-        createdAt: new Date(msg.createdAt),
-        attachments: msg.attachments,
-        searchMetadata: msg.searchMetadata,
-        tokenUsage: msg.tokenUsage,
-        reasoningDetails: msg.reasoningDetails,
-      }));
-      setMessages(formattedMessages);
-    } else if (conversationId === null) {
-      // Clear messages when starting new chat
+    if (!conversationId) {
       setMessages([]);
+      return;
     }
-  }, [convexMessages, conversationId, isLoading]);
+
+    // Check if there's an active stream for this conversation
+    const activeStream = activeStreams.get(conversationId);
+
+    if (activeStream) {
+      // Restore the streaming message along with conversation history
+      if (convexMessages) {
+        const formattedMessages = convexMessages.map((msg) => ({
+          id: msg._id,
+          role: msg.role as "user" | "assistant" | "system",
+          content: msg.content,
+          createdAt: new Date(msg.createdAt),
+          attachments: msg.attachments,
+          searchMetadata: msg.searchMetadata,
+          tokenUsage: msg.tokenUsage,
+          reasoningDetails: msg.reasoningDetails,
+        }));
+
+        // Add the streaming message at the end
+        const streamingMessage = {
+          id: activeStream.assistantMessageId,
+          role: 'assistant' as const,
+          content: activeStream.currentContent,
+          createdAt: new Date(),
+        };
+
+        setMessages([...formattedMessages, streamingMessage]);
+        console.log(`🔄 [Stream] Restored streaming message with ${activeStream.currentContent.length} characters`);
+      }
+    } else {
+      // No active stream - load messages from Convex
+      if (convexMessages) {
+        const formattedMessages = convexMessages.map((msg) => ({
+          id: msg._id,
+          role: msg.role as "user" | "assistant" | "system",
+          content: msg.content,
+          createdAt: new Date(msg.createdAt),
+          attachments: msg.attachments,
+          searchMetadata: msg.searchMetadata,
+          tokenUsage: msg.tokenUsage,
+          reasoningDetails: msg.reasoningDetails,
+        }));
+
+        // Only update if messages actually changed to prevent unnecessary re-renders
+        setMessages(prev => {
+          // If we're currently loading/streaming, preserve any optimistic messages at the end
+          if (isLoading || isStreaming) {
+            // Find optimistic messages (ones with string IDs instead of Convex IDs)
+            const optimisticMessages = prev.filter(m => typeof m.id === 'string' && !m.id.startsWith('j'));
+
+            // If we have optimistic messages, append them to Convex messages
+            if (optimisticMessages.length > 0) {
+              return [...formattedMessages, ...optimisticMessages];
+            }
+          }
+
+          return formattedMessages;
+        });
+      }
+    }
+  }, [convexMessages, conversationId, isLoading, isStreaming]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -622,244 +750,32 @@ export function ChatArea({ conversationId, isSidebarCollapsed = false, onStreami
             </div>
           )}
 
-          <form onSubmit={onSubmit} className="flex flex-col relative">
-            {/* File Type Error - Popup above chatbox */}
-            {fileTypeError && (
-              <div className="absolute bottom-full left-0 right-0 mb-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <div className="px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs shadow-lg">
-                  {fileTypeError}
-                </div>
-              </div>
-            )}
-
-            {/* Main Input Container */}
-            <div
-              className="relative flex flex-col-reverse rounded-2xl shadow-lg bg-chat-input"
-              onDragEnter={handleDragEnter}
-              onDragLeave={handleDragLeave}
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
-            >
-              {/* Toolbar - Now at the bottom visually but first in flex-col-reverse */}
-              <div className="flex items-center justify-between px-3 py-2">
-                <div className="flex items-center gap-1.5">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 rounded-md border border-border/40 hover:border-border hover:bg-accent/5"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={isProcessingFiles}
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Add files</p>
-                    </TooltipContent>
-                  </Tooltip>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.mp3,.wav,.m4a,.webm"
-                    onChange={handleFileSelect}
-                    className="hidden"
-                  />
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 rounded-md border border-border/40 hover:border-border hover:bg-accent/5"
-                      >
-                        <SlidersHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-56">
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <DropdownMenuItem
-                              onSelect={(e) => e.preventDefault()}
-                              onClick={() => setUseHighReasoning(!useHighReasoning)}
-                              className="flex items-center justify-between cursor-pointer"
-                            >
-                              <div className="flex items-center gap-2">
-                                <Timer className="h-4 w-4" />
-                                <span>Extended Thinking</span>
-                              </div>
-                              <div className={`h-4 w-8 rounded-full transition-colors ${useHighReasoning ? 'bg-primary' : 'bg-muted'} relative`}>
-                                <div className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${useHighReasoning ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                              </div>
-                            </DropdownMenuItem>
-                          </TooltipTrigger>
-                          <TooltipContent side="right" className="max-w-xs">
-                            Increases web searches and enables deeper reasoning. <strong>Consumes more usage.</strong>
-                          </TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <DropdownMenuItem
-                              onSelect={(e) => e.preventDefault()}
-                              disabled
-                              className="flex items-center justify-between cursor-not-allowed opacity-50"
-                            >
-                              <div className="flex items-center gap-2">
-                                <Search className="h-4 w-4" />
-                                <span>Research Mode</span>
-                              </div>
-                              <div className={`h-4 w-8 rounded-full transition-colors bg-muted relative`}>
-                                <div className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform translate-x-0.5`} />
-                              </div>
-                            </DropdownMenuItem>
-                          </TooltipTrigger>
-                          <TooltipContent side="right" className="max-w-xs">
-                            Conducts comprehensive research with 5 web searches and detailed analysis. <strong>Consumes significantly more usage</strong> due to extensive context and reasoning.
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                      <DropdownMenuItem
-                        onClick={() => setIsCreateTestOpen(true)}
-                        disabled={!conversationId || messages.length === 0}
-                        className="flex items-center gap-2"
-                      >
-                        <ListChecks className="h-4 w-4" />
-                        <span>Create Test</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  {/* Token Progress Circle */}
-                  {tokenCount && conversationId && (
-                    <TokenProgressCircle
-                      totalTokens={tokenCount.totalOutputTokens}
-                      limit={tokenCount.limit}
-                    />
-                  )}
-
-                  {/* Model Selector */}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 gap-1 px-3 text-xs font-medium rounded-md border border-border/40 hover:border-border hover:bg-accent/5"
-                      >
-                        {selectedModel.label}
-                        <ChevronDown className="h-3 w-3 opacity-50" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <TooltipProvider>
-                        {MODEL_OPTIONS.map((model, index) => {
-                          const menuItem = (
-                            <DropdownMenuItem
-                              key={`${model.value}-${index}`}
-                              onClick={() => !model.disabled && setSelectedModel(model)}
-                              disabled={model.disabled}
-                              className={model.disabled ? 'opacity-50 cursor-not-allowed' : ''}
-                            >
-                              <div className="flex flex-col gap-0.5">
-                                <span>{model.label}</span>
-                                {model.description && (
-                                  <span className="text-xs text-muted-foreground">
-                                    {model.description}
-                                  </span>
-                                )}
-                              </div>
-                            </DropdownMenuItem>
-                          );
-
-                          if (model.tooltip) {
-                            return (
-                              <Tooltip key={`${model.value}-${index}`}>
-                                <TooltipTrigger asChild>
-                                  {menuItem}
-                                </TooltipTrigger>
-                                <TooltipContent side="left" className="max-w-xs whitespace-pre-line">
-                                  {model.tooltip}
-                                </TooltipContent>
-                              </Tooltip>
-                            );
-                          }
-
-                          return menuItem;
-                        })}
-                      </TooltipProvider>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-
-                  {/* Submit Button */}
-                  <Button
-                    type="submit"
-                    size="icon"
-                    disabled={isLoading || isProcessingFiles || (!input.trim() && attachedFiles.length === 0) || tokenCount?.isLimitReached}
-                    className="h-8 w-8 rounded-md bg-primary hover:bg-primary/90 disabled:opacity-50"
-                    title={tokenCount?.isLimitReached ? "Token limit reached" : undefined}
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              {/* Textarea - Positioned second in flex-col-reverse so it appears on top */}
-              <Textarea
-                ref={textareaRef}
-                placeholder={tokenCount?.isLimitReached ? "Token limit reached - start a new conversation" : "How can I help you today?"}
-                value={input}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                disabled={isLoading || tokenCount?.isLimitReached}
-                className="min-h-[24px] max-h-[300px] resize-none border-0 bg-transparent px-4 pt-3 pb-2 text-sm leading-relaxed focus-visible:ring-0 focus-visible:ring-offset-0 overflow-hidden placeholder:text-muted-foreground/50"
-              />
-
-              {/* Drag and Drop Overlay */}
-              {isDraggingOver && (
-                <div className="absolute inset-0 z-50 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary bg-primary/5 backdrop-blur-sm">
-                  <div className="flex flex-col items-center gap-2 text-primary">
-                    <Plus className="h-8 w-8" />
-                    <p className="text-sm font-medium">Drop files</p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* File Attachments Container - Below Input Box */}
-            {(attachedFiles.length > 0 || isProcessingFiles) && (
-              <div className="relative rounded-b-2xl border-x border-b shadow-lg bg-chat-input">
-                {/* Background extension behind input box */}
-                <div className="absolute bottom-full -left-px -right-px h-12 -z-10 border-x border-border bg-chat-input"></div>
-
-                {attachedFiles.length > 0 && (
-                  <div className="flex flex-wrap gap-3 p-4">
-                    {attachedFiles.map((file, index) => (
-                      <FileAttachmentCard
-                        key={index}
-                        file={file}
-                        onRemove={() => removeFile(index)}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* Processing Indicator */}
-                {isProcessingFiles && (
-                  <div className="px-4 py-3 border-t border-border/40">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <LoadingWithText size="sm" speed="fast" />
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </form>
+          <ChatBox
+            value={input}
+            onChange={setInput}
+            onSubmit={onSubmit}
+            selectedModel={selectedModel}
+            onModelChange={setSelectedModel}
+            modelOptions={MODEL_OPTIONS}
+            attachedFiles={attachedFiles}
+            onFileSelect={handleFileSelect}
+            onRemoveFile={removeFile}
+            isProcessingFiles={isProcessingFiles}
+            fileInputRef={fileInputRef}
+            tokenCount={tokenCount}
+            useHighReasoning={useHighReasoning}
+            onHighReasoningChange={setUseHighReasoning}
+            onCreateTest={() => setIsCreateTestOpen(true)}
+            canCreateTest={!!conversationId && messages.length > 0}
+            fileTypeError={fileTypeError}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            isDraggingOver={isDraggingOver}
+            isLoading={isLoading}
+            textareaRef={textareaRef}
+          />
         </div>
       </div>
 

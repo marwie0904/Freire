@@ -125,22 +125,68 @@ export function drawCurvedPath(
  */
 export function drawElbowPath(
   from: { x: number; y: number },
-  to: { x: number; y: number }
+  to: { x: number; y: number },
+  fromSide?: 'top' | 'right' | 'bottom' | 'left',
+  toSide?: 'top' | 'right' | 'bottom' | 'left'
 ): string {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
+  // Offset distance from card edge before making a turn
+  const offset = 30;
 
-  // Determine if we should route horizontally or vertically first
-  // Use the longer distance to determine primary direction
-  if (Math.abs(dx) > Math.abs(dy)) {
-    // Route horizontally first, then vertically
-    const midX = from.x + dx / 2;
-    return `M ${from.x} ${from.y} L ${midX} ${from.y} L ${midX} ${to.y} L ${to.x} ${to.y}`;
-  } else {
-    // Route vertically first, then horizontally
-    const midY = from.y + dy / 2;
-    return `M ${from.x} ${from.y} L ${from.x} ${midY} L ${to.x} ${midY} L ${to.x} ${to.y}`;
+  // Calculate point after exiting source card with offset
+  let p1x = from.x;
+  let p1y = from.y;
+
+  if (fromSide === 'right') {
+    p1x = from.x + offset;
+    p1y = from.y;
+  } else if (fromSide === 'left') {
+    p1x = from.x - offset;
+    p1y = from.y;
+  } else if (fromSide === 'bottom') {
+    p1x = from.x;
+    p1y = from.y + offset;
+  } else if (fromSide === 'top') {
+    p1x = from.x;
+    p1y = from.y - offset;
   }
+
+  // Calculate point before entering target card with offset
+  let p2x = to.x;
+  let p2y = to.y;
+
+  if (toSide === 'right') {
+    p2x = to.x + offset;
+    p2y = to.y;
+  } else if (toSide === 'left') {
+    p2x = to.x - offset;
+    p2y = to.y;
+  } else if (toSide === 'bottom') {
+    p2x = to.x;
+    p2y = to.y + offset;
+  } else if (toSide === 'top') {
+    p2x = to.x;
+    p2y = to.y - offset;
+  }
+
+  // Now create the elbow path with a single 90-degree turn
+  // The turn should happen at the point where we align with the target entry axis
+
+  // Determine the corner point based on fromSide and toSide
+  let cornerX: number;
+  let cornerY: number;
+
+  if (fromSide === 'right' || fromSide === 'left') {
+    // Exiting horizontally, so extend horizontal first, then turn vertical
+    cornerX = p1x;
+    cornerY = p2y;
+  } else {
+    // Exiting vertically, so extend vertical first, then turn horizontal
+    cornerX = p2x;
+    cornerY = p1y;
+  }
+
+  // Build the path: start -> p1 (after offset) -> corner (90° turn) -> p2 (before target) -> end
+  return `M ${from.x} ${from.y} L ${p1x} ${p1y} L ${cornerX} ${cornerY} L ${p2x} ${p2y} L ${to.x} ${to.y}`;
 }
 
 /**
@@ -158,7 +204,7 @@ export function drawArrowPath(
     case 'straight':
       return drawStraightPath(from, to);
     case 'elbow':
-      return drawElbowPath(from, to);
+      return drawElbowPath(from, to, fromSide, toSide);
     case 'curved':
     default:
       return drawCurvedPath(from, to, fromSide, toSide);

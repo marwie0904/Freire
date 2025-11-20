@@ -15,9 +15,7 @@ export function CanvasSkeleton() {
 
       {/* Cube Loader - Centered */}
       <div className="absolute inset-0 flex items-center justify-center z-50">
-        <div className="w-24 h-24">
-          <CubeLoader size="lg" variant="primary" speed="fast" className="w-full h-full" />
-        </div>
+        <CubeLoader size="lg" variant="primary" speed="fast" />
       </div>
     </div>
   );

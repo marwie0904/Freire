@@ -17,6 +17,15 @@ export const list = query({
   },
 });
 
+// Get a specific card by ID
+export const get = query({
+  args: { id: v.id("canvasCards") },
+  handler: async (ctx, args) => {
+    const card = await ctx.db.get(args.id);
+    return card;
+  },
+});
+
 // Create a new card
 export const create = mutation({
   args: {
@@ -106,6 +115,16 @@ export const addMessage = mutation({
     id: v.id("canvasCards"),
     role: v.union(v.literal("user"), v.literal("assistant")),
     content: v.string(),
+    attachments: v.optional(
+      v.array(
+        v.object({
+          storageId: v.string(),
+          fileName: v.string(),
+          fileType: v.string(),
+          fileSize: v.number(),
+        })
+      )
+    ),
     tokenUsage: v.optional(
       v.object({
         promptTokens: v.number(),
@@ -138,6 +157,7 @@ export const addMessage = mutation({
       content: args.content,
       timestamp: Date.now(),
       tokenUsage: args.tokenUsage,
+      attachments: args.attachments,
     });
 
     await ctx.db.patch(args.id, {
@@ -145,6 +165,9 @@ export const addMessage = mutation({
       content: args.role === "assistant" ? args.content : card.content,
       updatedAt: Date.now(),
     });
+
+    // Return the updated conversation history so caller doesn't need to query again
+    return conversationHistory;
   },
 });
 

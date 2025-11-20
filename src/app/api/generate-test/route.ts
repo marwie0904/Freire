@@ -112,9 +112,6 @@ Output valid JSON only, no additional text or formatting.`;
           usage: {
             include: true,
           },
-          providerPreferences: {
-            order: ["hyperbolic"],
-          },
         }),
         prompt,
         temperature: 0.7,
@@ -131,7 +128,7 @@ Output valid JSON only, no additional text or formatting.`;
       const latencyMs = Date.now() - startTime;
 
       // OpenRouter returns usage in providerMetadata
-      const openrouterUsage = (result.experimental_providerMetadata as any)?.openrouter?.usage;
+      const openrouterUsage = (result as any).experimental_providerMetadata?.openrouter?.usage;
 
       console.log("📊 [RAW] OpenRouter usage:", JSON.stringify(openrouterUsage, null, 2));
       console.log("📊 [RAW] AI SDK usage:", JSON.stringify(result.usage, null, 2));
@@ -225,9 +222,6 @@ Output valid JSON only, no additional text or formatting.`;
             usage: {
               include: true,
             },
-            providerPreferences: {
-              order: ["gmicloud/fp4"],
-            },
           }),
           prompt,
           temperature: 0.7,
@@ -244,7 +238,7 @@ Output valid JSON only, no additional text or formatting.`;
         const latencyMs = Date.now() - startTime;
 
         // OpenRouter returns usage in providerMetadata
-        const openrouterUsage = (result.experimental_providerMetadata as any)?.openrouter?.usage;
+        const openrouterUsage = (result as any).experimental_providerMetadata?.openrouter?.usage;
 
         console.log("📊 [RAW] OpenRouter usage:", JSON.stringify(openrouterUsage, null, 2));
         console.log("📊 [RAW] AI SDK usage:", JSON.stringify(result.usage, null, 2));

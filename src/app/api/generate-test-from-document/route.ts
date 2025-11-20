@@ -270,9 +270,6 @@ Output valid JSON only, no additional text or formatting.`;
           usage: {
             include: true,
           },
-          providerPreferences: {
-            order: ["gmicloud/fp4"],
-          },
         }),
         prompt,
         temperature: 0.7,
@@ -288,8 +285,8 @@ Output valid JSON only, no additional text or formatting.`;
 
       // Track successful usage
       const latencyMs = Date.now() - startTime;
-      const inputTokens = result.usage?.promptTokens || (result.usage as any)?.inputTokens || 0;
-      const outputTokens = result.usage?.completionTokens || (result.usage as any)?.outputTokens || 0;
+      const inputTokens = (result.usage as any)?.promptTokens || 0;
+      const outputTokens = (result.usage as any)?.completionTokens || 0;
 
       await trackAIUsage({
         model: "openai/gpt-oss-120b",

@@ -237,8 +237,12 @@ export async function POST(req: Request) {
       if (providerType === "cerebras" || providerType === "gmi") {
         console.log(`🌊 [API] Using streaming ${providerType} web search`);
 
-        // Stream responses in real-time without backend Convex saves
+        // Stream responses in real-time and save to backend
         const encoder = new TextEncoder();
+
+        // Accumulate full text and metadata for backend save
+        let fullText = '';
+        let metadata: any = null;
 
         const customStream = new ReadableStream({
           async start(controller) {
@@ -264,11 +268,17 @@ export async function POST(req: Request) {
 
               for await (const chunk of stream) {
                 if (chunk.type === 'content') {
+                  // Accumulate full text
+                  fullText += chunk.data;
+
                   // Forward content chunks immediately to frontend
                   const formatted = `0:${JSON.stringify(chunk.data)}\n`;
                   controller.enqueue(encoder.encode(formatted));
                   console.log(`📤 [API] Streamed chunk: "${chunk.data}"`);
                 } else if (chunk.type === 'metadata') {
+                  // Store metadata for backend save
+                  metadata = chunk.data;
+
                   // Send metadata as a special message type
                   const metadataMsg = `d:${JSON.stringify(chunk.data)}\n`;
                   controller.enqueue(encoder.encode(metadataMsg));
@@ -279,7 +289,24 @@ export async function POST(req: Request) {
               console.log('✅ [API] Stream completed');
               controller.close();
 
-              // Generate title after stream completes
+              // Save assistant message to database BEFORE triggering title generation
+              if (conversationId && fullText && metadata) {
+                console.log('💾 [API] Saving assistant message to database...');
+                await convex.mutation(api.messages.create, {
+                  conversationId: conversationId as Id<"conversations">,
+                  content: fullText,
+                  role: 'assistant',
+                  tokenUsage: {
+                    promptTokens: metadata.usage.promptTokens,
+                    completionTokens: metadata.usage.completionTokens,
+                    totalTokens: metadata.usage.totalTokens,
+                  },
+                  searchMetadata: metadata.searchMetadata,
+                });
+                console.log('✅ [API] Assistant message saved');
+              }
+
+              // Generate title after message is saved
               if (conversationId) {
                 console.log('🎯 [API] Checking if title generation needed...');
                 const conversation = await convex.query(api.conversations.get, {
@@ -334,18 +361,18 @@ export async function POST(req: Request) {
         );
       }
 
-      const text = webSearchResult.content;
+      const text = webSearchResult?.content;
       console.log(`🔍 [API] ${providerType} result content type:`, typeof text);
       console.log(`🔍 [API] ${providerType} result content preview:`, text?.substring(0, 200));
 
       const usage = {
-        promptTokens: webSearchResult.usage.promptTokens,
-        completionTokens: webSearchResult.usage.completionTokens,
-        totalTokens: webSearchResult.usage.totalTokens
+        promptTokens: webSearchResult?.usage.promptTokens || 0,
+        completionTokens: webSearchResult?.usage.completionTokens || 0,
+        totalTokens: webSearchResult?.usage.totalTokens || 0
       };
 
       // Save assistant message to Convex with search metadata
-      if (conversationId && text) {
+      if (conversationId && text && webSearchResult) {
         await convex.mutation(api.messages.create, {
           conversationId: conversationId as Id<"conversations">,
           content: text,
@@ -382,7 +409,7 @@ export async function POST(req: Request) {
           latencyMs: Date.now() - startTime,
           conversationId: conversationId as string,
           success: true,
-          toolsUsed: webSearchResult.toolCalls > 0 ? ['webSearch'] : undefined
+          toolsUsed: webSearchResult && webSearchResult.toolCalls > 0 ? ['webSearch'] : undefined
         });
 
         await convex.mutation(api.aiTracking.track, {
