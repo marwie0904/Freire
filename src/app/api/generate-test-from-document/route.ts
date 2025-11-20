@@ -304,6 +304,7 @@ Output valid JSON only, no additional text or formatting.`;
         usageType: "file_analysis",
         latencyMs,
         success: true,
+        convex,
       });
     } catch (error) {
       const lastError = error as Error;
@@ -319,6 +320,7 @@ Output valid JSON only, no additional text or formatting.`;
         latencyMs,
         success: false,
         errorMessage: lastError.message,
+        convex,
       });
 
       return new Response(
@@ -391,6 +393,7 @@ Output valid JSON only, no additional text or formatting.`;
       latencyMs,
       success: false,
       errorMessage: error instanceof Error ? error.message : "Unknown error",
+      convex,
     });
 
     return new Response(

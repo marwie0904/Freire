@@ -10,11 +10,12 @@ import { getProviderForModel } from "@/lib/provider-helper";
 
 export const maxDuration = 30;
 
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-
 export async function POST(req: Request) {
   const startTime = Date.now();
   let modelName = "openai/gpt-oss-20b"; // Default model
+
+  // Initialize convex client inside POST function
+  const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
   try {
     const { message, cardId, canvasId, model } = await req.json();

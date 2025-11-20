@@ -4,8 +4,6 @@ import { Id } from "../../convex/_generated/dataModel";
 import { calculateLLMCost, trackLLMCallServer } from "./analytics/llm-tracking";
 import { usdToPhp } from "./currency";
 
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-
 interface TrackingData {
   model: string;
   inputTokens: number;
@@ -17,6 +15,7 @@ interface TrackingData {
   latencyMs: number;
   success: boolean;
   errorMessage?: string;
+  convex?: ConvexHttpClient;
 }
 
 export async function trackAIUsage(data: TrackingData) {
@@ -37,9 +36,10 @@ export async function trackAIUsage(data: TrackingData) {
     errorMessage: data.errorMessage,
   });
 
-  // Track in Convex
-  try {
-    await convex.mutation(api.aiTracking.track, {
+  // Track in Convex (only if convex client is provided)
+  if (data.convex) {
+    try {
+      await data.convex.mutation(api.aiTracking.track, {
       inputTokens: data.inputTokens,
       outputTokens: data.outputTokens,
       reasoningTokens: data.reasoningTokens,
@@ -53,9 +53,10 @@ export async function trackAIUsage(data: TrackingData) {
       latencyMs: data.latencyMs,
       success: data.success,
       errorMessage: data.errorMessage,
-    });
-    console.log("✅ AI usage tracked in Convex");
-  } catch (error) {
-    console.error("Failed to track AI usage in Convex:", error);
+      });
+      console.log("✅ AI usage tracked in Convex");
+    } catch (error) {
+      console.error("Failed to track AI usage in Convex:", error);
+    }
   }
 }
