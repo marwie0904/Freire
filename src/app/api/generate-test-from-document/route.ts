@@ -64,6 +64,10 @@ export async function POST(req: Request) {
     console.log("Test Format:", testFormat);
     console.log("Question Count:", questionCount);
 
+    // Define limits for test generation (higher than chat)
+    const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+    const MAX_FILES = 10; // Maximum 10 files
+
     // Define supported file types
     const SUPPORTED_TYPES = [
       "application/pdf",
@@ -87,13 +91,30 @@ export async function POST(req: Request) {
       );
     }
 
-    // Validate file types
+    // Validate max files
+    if (files.length > MAX_FILES) {
+      return new Response(
+        JSON.stringify({ error: `Maximum ${MAX_FILES} files allowed for test generation` }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate file types and sizes
     for (const file of files) {
       if (!SUPPORTED_TYPES.includes(file.type)) {
         return new Response(
           JSON.stringify({
             error: `File type not supported: ${file.type}`,
             details: `Supported file types: PDF, Images (PNG, JPG, WEBP, GIF), Audio (MP3, WAV, M4A, WEBM)`,
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (file.size > MAX_FILE_SIZE) {
+        return new Response(
+          JSON.stringify({
+            error: `File "${file.name}" exceeds 50MB limit (${(file.size / (1024 * 1024)).toFixed(1)}MB)`,
           }),
           { status: 400, headers: { "Content-Type": "application/json" } }
         );

@@ -39,7 +39,8 @@ const ACCEPTED_FILE_TYPES = {
   "audio/webm": [".webm"],
 };
 
-const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB (higher limit for test generation)
+const MAX_FILES = 10; // Maximum 10 files for test generation
 
 export function CreateTestFromDocumentModal({
   isOpen,
@@ -65,6 +66,12 @@ export function CreateTestFromDocumentModal({
 
     if (allFiles.length === 0) return;
 
+    // Check if adding files would exceed the limit
+    if (selectedFiles.length + allFiles.length > MAX_FILES) {
+      setError(`Maximum ${MAX_FILES} files allowed for test generation`);
+      return;
+    }
+
     // Validate file types and sizes (hook handles both)
     const validFiles = validateFiles(allFiles);
 
@@ -75,7 +82,7 @@ export function CreateTestFromDocumentModal({
 
     // All validations passed
     setSelectedFiles((prev) => [...prev, ...validFiles]);
-  }, [validateFiles]);
+  }, [validateFiles, selectedFiles.length]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -191,7 +198,7 @@ export function CreateTestFromDocumentModal({
                   : "Drag & drop files here, or click to browse"}
               </p>
               <p className="text-xs text-muted-foreground">
-                Supports PDF, Images (PNG, JPG, WEBP, GIF), Audio (MP3, WAV, M4A) - max 15MB each
+                Supports PDF, Images (PNG, JPG, WEBP, GIF), Audio (MP3, WAV, M4A) - max 50MB each, up to 10 files
               </p>
             </div>
           </div>
