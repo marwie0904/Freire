@@ -1,6 +1,7 @@
 import { Id } from "../../convex/_generated/dataModel";
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB in bytes
+export const MAX_ATTACHMENTS = 5; // Maximum number of attachments per query
 
 const ALLOWED_FILE_TYPES = [
   // Documents
@@ -60,6 +61,14 @@ export async function uploadFilesToConvex(
   generateUploadUrl: () => Promise<string>
 ): Promise<UploadResult> {
   try {
+    // Check max attachments limit
+    if (files.length > MAX_ATTACHMENTS) {
+      return {
+        success: false,
+        error: `Maximum ${MAX_ATTACHMENTS} attachments allowed per query`,
+      };
+    }
+
     const attachments: FileAttachment[] = [];
 
     for (const file of files) {

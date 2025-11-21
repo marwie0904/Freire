@@ -203,6 +203,32 @@ export const extractFileContext = action({
           contextResults.push(`[No context extracted from file ${i + 1}]`);
           console.log(`No context extracted from file ${i + 1}`);
         }
+
+        // Schedule file deletion after 5 minutes
+        if (fileUri) {
+          const fileName = uploadData.file?.name;
+          console.log(`Scheduling deletion of file ${i + 1} (${fileName}) in 5 minutes`);
+
+          // Delete after 5 minutes (300000ms)
+          setTimeout(async () => {
+            try {
+              const deleteResponse = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${GEMINI_API_KEY}`,
+                {
+                  method: "DELETE",
+                }
+              );
+
+              if (deleteResponse.ok) {
+                console.log(`Successfully deleted file ${i + 1} (${fileName}) from Gemini`);
+              } else {
+                console.error(`Failed to delete file ${i + 1} (${fileName}):`, await deleteResponse.text());
+              }
+            } catch (error) {
+              console.error(`Error deleting file ${i + 1} (${fileName}):`, error);
+            }
+          }, 300000); // 5 minutes in milliseconds
+        }
       }
 
       const combinedContext = contextResults.join("\n\n");
