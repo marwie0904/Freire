@@ -94,10 +94,34 @@ export const createPlaceholder = mutation({
   },
 });
 
+// Update generation status (uploading -> generating)
+export const updateGenerationStatus = mutation({
+  args: {
+    testId: v.id("tests"),
+    generationStatus: v.union(v.literal("uploading"), v.literal("generating")),
+  },
+  handler: async (ctx, args) => {
+    const user = await getCurrentUserOrThrow(ctx);
+    const test = await ctx.db.get(args.testId);
+
+    if (!test) throw new Error("Test not found");
+    if (test.userId !== user._id) {
+      throw new Error("Unauthorized access to test");
+    }
+
+    await ctx.db.patch(args.testId, {
+      generationStatus: args.generationStatus,
+    });
+
+    return args.testId;
+  },
+});
+
 // Update test with generated questions and mark as complete
 export const completeGeneration = mutation({
   args: {
     testId: v.id("tests"),
+    title: v.string(),
     questions: v.array(questionSchema),
   },
   handler: async (ctx, args) => {
@@ -109,10 +133,12 @@ export const completeGeneration = mutation({
       throw new Error("Unauthorized access to test");
     }
 
-    // Update the test with questions and mark as not generating
+    // Update the test with questions, title, and mark as not generating
     await ctx.db.patch(args.testId, {
+      title: args.title,
       questions: args.questions,
       isGenerating: false,
+      generationStatus: undefined,
     });
 
     // Create an incomplete testResponse for the newly generated test
@@ -160,6 +186,8 @@ export const list = query({
           // If isCompleted is true, it's completed
           isCompleted: latestResponse?.isCompleted ?? true,
           hasResponse: !!latestResponse,
+          score: latestResponse?.score,
+          totalQuestions: latestResponse?.totalQuestions,
         };
       })
     );

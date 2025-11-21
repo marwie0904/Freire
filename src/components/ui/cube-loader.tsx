@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 
 interface CubeLoaderProps {
   size?: "xs" | "sm" | "md" | "lg";
-  variant?: "primary" | "muted" | "accent" | "error";
+  variant?: "primary" | "muted" | "accent" | "error" | "yellow" | "blue";
   speed?: "slow" | "normal" | "fast";
   className?: string;
 }
@@ -42,6 +42,8 @@ export function CubeLoader({
     muted: "hsl(215, 20.2%, 65.1%)",
     accent: "hsl(240, 5.9%, 10%)",
     error: "hsl(0, 84%, 60%)", // Red color for errors
+    yellow: "hsl(45, 93%, 47%)", // Yellow for uploading
+    blue: "hsl(217, 91%, 60%)", // Blue for generating
   };
 
   const baseColor = variantColors[variant];

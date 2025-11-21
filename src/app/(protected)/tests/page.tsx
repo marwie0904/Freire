@@ -6,7 +6,7 @@ import { api } from "convex/_generated/api";
 import { Id } from "convex/_generated/dataModel";
 import { Sidebar } from "@/components/sidebar";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -168,24 +168,27 @@ export default function TestsPage() {
       </aside>
 
       {/* Mobile Sidebar */}
-      <Sheet>
-        <SheetTrigger asChild className="md:hidden">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute left-4 top-4 z-50"
-          >
-            <Menu className="h-5 w-5" />
-          </Button>
-        </SheetTrigger>
-        <SheetContent side="left" className="w-[280px] p-0">
-          <Sidebar
-            activeConversationId={null}
-            onSelectConversation={() => {}}
-            onNewChat={() => {}}
-          />
-        </SheetContent>
-      </Sheet>
+      <div className="md:hidden">
+        <Sheet>
+          <SheetTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="fixed left-4 top-4 z-50"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="left" className="w-[280px] p-0">
+            <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
+            <Sidebar
+              activeConversationId={null}
+              onSelectConversation={() => {}}
+              onNewChat={() => {}}
+            />
+          </SheetContent>
+        </Sheet>
+      </div>
 
       {/* Main Content */}
       <main className="flex-1 relative">
@@ -202,20 +205,21 @@ export default function TestsPage() {
 
         <div className="flex h-screen flex-col bg-background">
           {/* Header */}
-          <div className="flex items-center justify-between px-8 pt-6 pb-4 border-b border-border/40">
-            <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between px-4 md:px-8 pt-6 pb-4 border-b border-border/40">
+            <div className={`flex items-center gap-3 transition-all duration-300 ${isSidebarCollapsed ? 'md:ml-12' : ''} ml-12 md:ml-0`}>
               <ListChecks className="h-6 w-6 text-foreground" />
-              <h1 className="text-2xl font-normal text-foreground">All Tests</h1>
+              <h1 className="text-xl md:text-2xl font-normal text-foreground">All Tests</h1>
             </div>
-            <Button onClick={() => setIsCreateModalOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Create New Test
+            <Button onClick={() => setIsCreateModalOpen(true)} className="whitespace-nowrap">
+              <Plus className="h-4 w-4 mr-1 md:mr-2" />
+              <span className="hidden sm:inline">New Test</span>
+              <span className="sm:hidden">New</span>
             </Button>
           </div>
 
           {/* Tests List */}
           <ScrollArea className="flex-1">
-            <div className="mx-auto max-w-4xl px-8 py-8">
+            <div className="mx-auto max-w-4xl px-4 md:px-8 py-8">
               {tests === undefined ? (
                 <div className="grid gap-4">
                   {[1, 2, 3].map((i) => (
@@ -254,13 +258,16 @@ export default function TestsPage() {
                             onClick={() => handleTestClick(test)}
                             className={`block ${test.isGenerating ? 'cursor-not-allowed' : 'cursor-pointer'}`}
                           >
-                            <div className={`group p-6 rounded-lg border border-border/40 transition-all ${!test.isGenerating && 'hover:border-border hover:bg-accent/5'}`}>
-                          <div className="flex items-center gap-6">
+                            <div className={`group p-4 md:p-6 rounded-lg border border-border/40 transition-all ${!test.isGenerating && 'hover:border-border hover:bg-accent/5'}`}>
+                          <div className="flex items-center gap-3 md:gap-6">
                             {/* Large Icon */}
-                            <div className="flex-shrink-0">
+                            <div className="flex-shrink-0 hidden sm:block">
                               {test.isGenerating ? (
                                 <div className="h-14 w-14 rounded-lg flex items-center justify-center overflow-hidden">
-                                  <CubeLoader size="md" variant="primary" />
+                                  <CubeLoader
+                                    size="md"
+                                    variant={test.generationStatus === "uploading" ? "yellow" : "blue"}
+                                  />
                                 </div>
                               ) : (
                                 <>
@@ -284,12 +291,19 @@ export default function TestsPage() {
                             </div>
 
                             {/* Content */}
-                            <div className="flex-1 min-w-0">
+                            <div className="flex-1 min-w-0 overflow-hidden">
                               {/* Badges */}
-                              <div className="flex items-center gap-2 mb-1.5">
+                              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                                 {test.isGenerating ? (
-                                  <Badge variant="outline" className="text-xs text-blue-500 border-blue-500 animate-pulse">
-                                    Generating...
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-xs animate-pulse ${
+                                      test.generationStatus === "uploading"
+                                        ? "text-yellow-500 border-yellow-500"
+                                        : "text-blue-500 border-blue-500"
+                                    }`}
+                                  >
+                                    {test.generationStatus === "uploading" ? "Uploading files..." : "Generating test..."}
                                   </Badge>
                                 ) : (
                                   <>
@@ -314,24 +328,50 @@ export default function TestsPage() {
                                       </Badge>
                                     )}
                                     {test.isCompleted && (
-                                      <Badge variant="outline" className="text-xs text-green-500 border-green-500">
-                                        Complete
-                                      </Badge>
+                                      <>
+                                        <Badge variant="outline" className="text-xs text-green-500 border-green-500">
+                                          Complete
+                                        </Badge>
+                                        {test.score !== undefined && test.totalQuestions !== undefined && test.totalQuestions > 0 && (
+                                          <Badge variant="outline" className="text-xs text-blue-500 border-blue-500">
+                                            {Math.round((test.score / test.totalQuestions) * 100)}%
+                                          </Badge>
+                                        )}
+                                      </>
                                     )}
                                   </>
                                 )}
                               </div>
 
                               {/* Title */}
-                              <h3 className="text-lg font-medium truncate">
+                              <h3 className="text-base md:text-lg font-medium truncate">
                                 {test.title}
                               </h3>
+
+                              {/* Metadata (mobile) */}
+                              <div className="sm:hidden text-xs text-muted-foreground mt-1 space-x-2">
+                                <span>
+                                  {test.isGenerating
+                                    ? test.generationStatus === "uploading"
+                                      ? "Uploading..."
+                                      : "Generating..."
+                                    : `${test.questions.length} Q`}
+                                </span>
+                                <span>•</span>
+                                <span>
+                                  {formatDate(test.createdAt)}
+                                </span>
+                              </div>
                             </div>
 
-                            {/* Metadata */}
-                            <div className="flex-shrink-0 text-right text-sm text-muted-foreground space-y-1">
+                            {/* Metadata (desktop) */}
+                            <div className="hidden sm:flex flex-shrink-0 text-right text-sm text-muted-foreground space-y-1 flex-col">
                               <div>
-                                {test.isGenerating ? "Generating..." : `${test.questions.length} question${test.questions.length !== 1 ? "s" : ""}`}
+                                {test.isGenerating
+                                  ? test.generationStatus === "uploading"
+                                    ? "Uploading files..."
+                                    : "Generating test..."
+                                  : `${test.questions.length} question${test.questions.length !== 1 ? "s" : ""}`}
                               </div>
                               <div>
                                 {formatDate(test.createdAt)}

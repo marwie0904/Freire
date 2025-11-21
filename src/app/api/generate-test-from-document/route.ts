@@ -135,6 +135,22 @@ export async function POST(req: Request) {
       );
     }
 
+    // Step 0: Create placeholder test immediately
+    console.log("Creating placeholder test...");
+    const conversationId = await convex.mutation(api.conversations.create, {
+      title: "Document Test (Generating...)",
+    });
+
+    const placeholderTestId = await convex.mutation(api.tests.create, {
+      conversationId: conversationId as Id<"conversations">,
+      title: "Generating test...",
+      questions: [],
+      isGenerating: true,
+      generationStatus: "uploading" as const,
+    });
+
+    console.log("Placeholder test created:", placeholderTestId);
+
     // Step 1: Upload files to Convex storage and get URLs
     console.log("Uploading files to Convex storage...");
     const fileUrls: string[] = [];
@@ -174,6 +190,12 @@ export async function POST(req: Request) {
     }
 
     console.log("Files uploaded successfully");
+
+    // Update status to "generating"
+    await convex.mutation(api.tests.updateGenerationStatus, {
+      testId: placeholderTestId as Id<"tests">,
+      generationStatus: "generating" as const,
+    });
 
     // Step 2: Extract file context using Gemini 2.5 Flash-Lite
     console.log("Extracting file content with Gemini 2.5 Flash-Lite...");
@@ -375,24 +397,25 @@ Output valid JSON only, no additional text or formatting.`;
       id: q.id || `q${index + 1}`,
     }));
 
-    // Create a temporary conversation for this test
-    const conversationId = await convex.mutation(api.conversations.create, {
+    // Update conversation title
+    await convex.mutation(api.conversations.updateTitle, {
+      conversationId: conversationId as Id<"conversations">,
       title: `Document Test: ${testData.title}`,
     });
 
-    // Save test to Convex
-    const testId = await convex.mutation(api.tests.create, {
-      conversationId: conversationId as Id<"conversations">,
+    // Complete the test generation
+    await convex.mutation(api.tests.completeGeneration, {
+      testId: placeholderTestId as Id<"tests">,
       title: testData.title,
       questions: testData.questions,
     });
 
-    console.log("✓ Test saved to Convex:", testId);
+    console.log("✓ Test generation complete:", placeholderTestId);
 
     // Return the test data
     return new Response(
       JSON.stringify({
-        testId,
+        testId: placeholderTestId,
         test: testData,
         modelUsed: "gpt-oss-120b",
       }),

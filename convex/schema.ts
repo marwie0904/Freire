@@ -122,6 +122,7 @@ export default defineSchema({
       })
     ),
     isGenerating: v.optional(v.boolean()), // Track if test is being generated in background
+    generationStatus: v.optional(v.union(v.literal("uploading"), v.literal("generating"))), // Track generation stage
     createdAt: v.number(),
   })
     .index("by_user", ["userId", "createdAt"])

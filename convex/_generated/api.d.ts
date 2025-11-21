@@ -28,6 +28,7 @@ import type * as openai from "../openai.js";
 import type * as projectFiles from "../projectFiles.js";
 import type * as projects from "../projects.js";
 import type * as responseFeedback from "../responseFeedback.js";
+import type * as testGeneration from "../testGeneration.js";
 import type * as testResponses from "../testResponses.js";
 import type * as tests from "../tests.js";
 import type * as users from "../users.js";
@@ -60,6 +61,7 @@ declare const fullApi: ApiFromModules<{
   projectFiles: typeof projectFiles;
   projects: typeof projects;
   responseFeedback: typeof responseFeedback;
+  testGeneration: typeof testGeneration;
   testResponses: typeof testResponses;
   tests: typeof tests;
   users: typeof users;
