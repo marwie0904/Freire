@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useMutation } from "convex/react";
 import { api } from "convex/_generated/api";
 import { FileText, Sparkles, MessageSquare } from "lucide-react";
@@ -36,6 +37,8 @@ export default function WaitlistPage() {
     email: "",
     gradeLevel: "",
     interestedFeature: "",
+    joinBetaTesting: false,
+    operatingSystems: [] as string[],
   });
 
   const joinWaitlist = useMutation(api.waitlist.joinWaitlist);
@@ -54,6 +57,8 @@ export default function WaitlistPage() {
         email: formData.email,
         gradeLevel: formData.gradeLevel || undefined,
         interestedFeature: formData.interestedFeature || undefined,
+        joinBetaTesting: formData.joinBetaTesting,
+        operatingSystems: formData.operatingSystems.length > 0 ? formData.operatingSystems : undefined,
       });
 
       setShowSignupModal(false);
@@ -63,12 +68,23 @@ export default function WaitlistPage() {
         email: "",
         gradeLevel: "",
         interestedFeature: "",
+        joinBetaTesting: false,
+        operatingSystems: [],
       });
     } catch (error) {
       console.error("Error joining waitlist:", error);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleOSToggle = (os: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      operatingSystems: prev.operatingSystems.includes(os)
+        ? prev.operatingSystems.filter((item) => item !== os)
+        : [...prev.operatingSystems, os],
+    }));
   };
 
   const features = [
@@ -326,6 +342,56 @@ export default function WaitlistPage() {
                   </SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-3 pt-2">
+              <div className="flex items-start space-x-3">
+                <Checkbox
+                  id="joinBetaTesting"
+                  checked={formData.joinBetaTesting}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, joinBetaTesting: checked as boolean })
+                  }
+                />
+                <div className="space-y-1 leading-none">
+                  <Label
+                    htmlFor="joinBetaTesting"
+                    className="text-sm font-medium cursor-pointer"
+                  >
+                    JOIN BETA TESTING
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Beta testers will be given free credits + a free month on launch.
+                    Note that beta testers will be given surveys and forms to answer for feedback.
+                    Beta testers are chosen at random and will be invited via email.
+                  </p>
+                </div>
+              </div>
+
+              {formData.joinBetaTesting && (
+                <div className="space-y-2 pl-7 animate-in fade-in-50 slide-in-from-top-2">
+                  <Label className="text-sm">
+                    Which OS do you use? <span className="text-muted-foreground">(Select all that apply)</span>
+                  </Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {["iOS", "Android", "Windows", "Mac", "Others"].map((os) => (
+                      <div key={os} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`os-${os}`}
+                          checked={formData.operatingSystems.includes(os)}
+                          onCheckedChange={() => handleOSToggle(os)}
+                        />
+                        <Label
+                          htmlFor={`os-${os}`}
+                          className="text-sm font-normal cursor-pointer"
+                        >
+                          {os}
+                        </Label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <Button

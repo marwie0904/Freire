@@ -355,6 +355,8 @@ export default defineSchema({
     email: v.string(),
     gradeLevel: v.optional(v.string()),
     interestedFeature: v.optional(v.string()),
+    joinBetaTesting: v.optional(v.boolean()),
+    operatingSystems: v.optional(v.array(v.string())),
 
     createdAt: v.number(),
   })
