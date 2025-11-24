@@ -15,7 +15,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      router.push("/auth/sign-in");
+      router.push("/waitlist");
     }
   }, [isAuthenticated, isLoading, router]);
 
