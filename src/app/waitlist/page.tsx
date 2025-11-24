@@ -238,6 +238,7 @@ export default function WaitlistPage() {
                     src={feature.image}
                     alt={`${feature.title} screenshot`}
                     fill
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 33vw, 400px"
                     className="object-cover"
                   />
                 </div>
