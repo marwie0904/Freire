@@ -361,9 +361,7 @@ export default function WaitlistPage() {
                     JOIN BETA TESTING
                   </Label>
                   <p className="text-xs text-muted-foreground">
-                    Beta testers will be given free credits + a free month on launch.
-                    Note that beta testers will be given surveys and forms to answer for feedback.
-                    Beta testers are chosen at random and will be invited via email.
+                    Get free credits + 1 month free on launch. Beta testers provide feedback through surveys and are randomly selected via email.
                   </p>
                 </div>
               </div>
